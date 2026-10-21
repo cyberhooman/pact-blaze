@@ -1,8 +1,9 @@
 pragma cashscript ^0.14.0;
 
 // Pact: stake BCH on your own goal.
-// The AI oracle only decides WHO gets the stake back: the owner (goal met) or the
-// beneficiary (goal missed). It can never send the money anywhere else.
+// The AI oracle has exactly one power: to give the stake BACK to its owner when the goal is met.
+// It can never send the money anywhere else. Only the owner (giving up) or the deadline can
+// send the stake to the beneficiary, so a stranger can't make anyone lose their stake.
 contract Pact(
     bytes20 ownerPkh,
     bytes20 beneficiaryPkh,
@@ -10,29 +11,30 @@ contract Pact(
     int deadline,
     int fee
 ) {
-    // verdict 0x01 = goal met (stake back to owner), 0x00 = missed (stake to beneficiary).
-    // The oracle signs this exact outpoint + verdict, so a verdict can't be replayed on another pact.
-    // No user signature: anyone holding the oracle's signature can broadcast the payout.
-    function settle(datasig verdictSig, bytes1 verdict) {
+    // Goal met: the oracle signed this exact outpoint + 0x01, so a verdict can't be replayed on
+    // another pact. No user signature: anyone holding the oracle's signature can broadcast it.
+    function release(datasig verdictSig) {
         bytes msg = tx.inputs[this.activeInputIndex].outpointTransactionHash
             + toPaddedBytes(tx.inputs[this.activeInputIndex].outpointIndex, 4)
-            + verdict;
+            + 0x01;
         require(checkDataSig(verdictSig, msg, oraclePk));
-
-        bytes20 payee = beneficiaryPkh;
-        if (verdict == 0x01) {
-            payee = ownerPkh;
-        } else {
-            require(verdict == 0x00);
-        }
-
         require(tx.inputs.length == 1);
         require(tx.outputs.length == 1);
-        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(payee));
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(ownerPkh));
         require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - fee);
     }
 
-    // Deadline passed with no verdict: anyone can send the stake to the beneficiary.
+    // The owner gives up: the stake goes to the beneficiary. Needs the owner's own signature.
+    function forfeit(pubkey ownerPk, sig ownerSig) {
+        require(hash160(ownerPk) == ownerPkh);
+        require(checkSig(ownerSig, ownerPk));
+        require(tx.inputs.length == 1);
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(beneficiaryPkh));
+        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - fee);
+    }
+
+    // Deadline passed without a release: anyone can send the stake to the beneficiary.
     // This path needs no oracle, so funds are never stuck if the oracle disappears.
     function expire() {
         require(tx.time >= deadline);

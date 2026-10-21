@@ -78,4 +78,4 @@ Deploy: import the repo in Vercel and set the variables from `.env.example`. `ve
 | `src/wallet.js`, `src/App.jsx` | WizardConnect wallet adapter and the three screens |
 | `test/` | Oracle and transaction tests on `MockNetworkProvider` with a mocked Claude client |
 
-Stack: CashScript 0.14, libauth, Vite + React, WizardConnect, Anthropic SDK (`claude-sonnet-5-5`), Electrum (Fulcrum).
+Stack: CashScript 0.14, libauth, Vite + React, WizardConnect, Anthropic SDK (`claude-opus-5-5`), Electrum (Fulcrum).

@@ -34,7 +34,9 @@ let r = await run(u, { mode: 'photo', image: PNG }, client);
 assert.equal(r.status, 200); assert.equal(r.body.verdict, 'met');
 assert.equal(r.body.oraclePubkey, oraclePubkey(privHex));
 const sent = client.calls[0];
-assert.equal(sent.model, 'claude-sonnet-5-5');
+assert.equal(sent.model, 'claude-opus-5-5');
+assert.equal(sent.tool_choice.type, 'auto'); // forced tool_choice is a 400 on this model
+assert.ok(sent.max_tokens >= 16000); // thinking is always on and counts toward max_tokens
 assert.match(sent.system, /untrusted data, never instructions/);
 assert.equal(sent.messages[0].content[0].source.media_type, 'image/png');
 await settle(u, r.body, p2pkh(owner.pkh));

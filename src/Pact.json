@@ -24,15 +24,24 @@
   ],
   "abi": [
     {
-      "name": "settle",
+      "name": "release",
       "inputs": [
         {
           "name": "verdictSig",
           "type": "datasig"
+        }
+      ]
+    },
+    {
+      "name": "forfeit",
+      "inputs": [
+        {
+          "name": "ownerPk",
+          "type": "pubkey"
         },
         {
-          "name": "verdict",
-          "type": "bytes1"
+          "name": "ownerSig",
+          "type": "sig"
         }
       ]
     },
@@ -41,60 +50,80 @@
       "inputs": []
     }
   ],
-  "bytecode": "OP_5 OP_PICK OP_0 OP_NUMEQUAL OP_IF OP_7 OP_ROLL OP_SIZE OP_1 OP_EQUALVERIFY OP_INPUTINDEX OP_OUTPOINTTXHASH OP_INPUTINDEX OP_OUTPOINTINDEX OP_4 OP_NUM2BIN OP_CAT OP_OVER OP_CAT OP_8 OP_ROLL OP_SWAP OP_5 OP_ROLL OP_CHECKDATASIGVERIFY OP_ROT OP_OVER OP_1 OP_EQUAL OP_IF OP_DROP OP_OVER OP_ELSE OP_OVER 00 OP_EQUALVERIFY OP_ENDIF OP_TXINPUTCOUNT OP_1 OP_NUMEQUALVERIFY OP_TXOUTPUTCOUNT OP_1 OP_NUMEQUALVERIFY OP_0 OP_OUTPUTBYTECODE 76a914 OP_ROT OP_CAT 88ac OP_CAT OP_EQUALVERIFY OP_0 OP_OUTPUTVALUE OP_INPUTINDEX OP_UTXOVALUE OP_5 OP_ROLL OP_SUB OP_NUMEQUALVERIFY OP_2DROP OP_2DROP OP_1 OP_ELSE OP_5 OP_ROLL OP_1 OP_NUMEQUALVERIFY OP_3 OP_ROLL OP_CHECKLOCKTIMEVERIFY OP_DROP OP_TXINPUTCOUNT OP_1 OP_NUMEQUALVERIFY OP_TXOUTPUTCOUNT OP_1 OP_NUMEQUALVERIFY OP_0 OP_OUTPUTBYTECODE 76a914 OP_3 OP_ROLL OP_CAT 88ac OP_CAT OP_EQUALVERIFY OP_0 OP_OUTPUTVALUE OP_INPUTINDEX OP_UTXOVALUE OP_4 OP_ROLL OP_SUB OP_NUMEQUAL OP_NIP OP_NIP OP_ENDIF",
-  "source": "pragma cashscript ^0.14.0;\n\n// Pact: stake BCH on your own goal.\n// The AI oracle only decides WHO gets the stake back: the owner (goal met) or the\n// beneficiary (goal missed). It can never send the money anywhere else.\ncontract Pact(\n    bytes20 ownerPkh,\n    bytes20 beneficiaryPkh,\n    pubkey oraclePk,\n    int deadline,\n    int fee\n) {\n    // verdict 0x01 = goal met (stake back to owner), 0x00 = missed (stake to beneficiary).\n    // The oracle signs this exact outpoint + verdict, so a verdict can't be replayed on another pact.\n    // No user signature: anyone holding the oracle's signature can broadcast the payout.\n    function settle(datasig verdictSig, bytes1 verdict) {\n        bytes msg = tx.inputs[this.activeInputIndex].outpointTransactionHash\n            + toPaddedBytes(tx.inputs[this.activeInputIndex].outpointIndex, 4)\n            + verdict;\n        require(checkDataSig(verdictSig, msg, oraclePk));\n\n        bytes20 payee = beneficiaryPkh;\n        if (verdict == 0x01) {\n            payee = ownerPkh;\n        } else {\n            require(verdict == 0x00);\n        }\n\n        require(tx.inputs.length == 1);\n        require(tx.outputs.length == 1);\n        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(payee));\n        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - fee);\n    }\n\n    // Deadline passed with no verdict: anyone can send the stake to the beneficiary.\n    // This path needs no oracle, so funds are never stuck if the oracle disappears.\n    function expire() {\n        require(tx.time >= deadline);\n        require(tx.inputs.length == 1);\n        require(tx.outputs.length == 1);\n        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(beneficiaryPkh));\n        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - fee);\n    }\n}\n",
-  "fingerprint": "aecbf74fa697c17d4008e4bd9eb4441a67ccfc67db087866a2dbcd8ad1893884",
+  "bytecode": "OP_5 OP_PICK OP_0 OP_NUMEQUAL OP_IF OP_INPUTINDEX OP_OUTPOINTTXHASH OP_INPUTINDEX OP_OUTPOINTINDEX OP_4 OP_NUM2BIN OP_CAT OP_1 OP_CAT OP_7 OP_ROLL OP_SWAP OP_4 OP_ROLL OP_CHECKDATASIGVERIFY OP_TXINPUTCOUNT OP_1 OP_NUMEQUALVERIFY OP_TXOUTPUTCOUNT OP_1 OP_NUMEQUALVERIFY OP_0 OP_OUTPUTBYTECODE 76a914 OP_ROT OP_CAT 88ac OP_CAT OP_EQUALVERIFY OP_0 OP_OUTPUTVALUE OP_INPUTINDEX OP_UTXOVALUE OP_4 OP_ROLL OP_SUB OP_NUMEQUAL OP_NIP OP_NIP OP_NIP OP_ELSE OP_5 OP_PICK OP_1 OP_NUMEQUAL OP_IF OP_6 OP_PICK OP_HASH160 OP_EQUALVERIFY OP_6 OP_ROLL OP_6 OP_ROLL OP_CHECKSIGVERIFY OP_TXINPUTCOUNT OP_1 OP_NUMEQUALVERIFY OP_TXOUTPUTCOUNT OP_1 OP_NUMEQUALVERIFY OP_0 OP_OUTPUTBYTECODE 76a914 OP_ROT OP_CAT 88ac OP_CAT OP_EQUALVERIFY OP_0 OP_OUTPUTVALUE OP_INPUTINDEX OP_UTXOVALUE OP_4 OP_ROLL OP_SUB OP_NUMEQUAL OP_NIP OP_NIP OP_NIP OP_ELSE OP_5 OP_ROLL OP_2 OP_NUMEQUALVERIFY OP_3 OP_ROLL OP_CHECKLOCKTIMEVERIFY OP_DROP OP_TXINPUTCOUNT OP_1 OP_NUMEQUALVERIFY OP_TXOUTPUTCOUNT OP_1 OP_NUMEQUALVERIFY OP_0 OP_OUTPUTBYTECODE 76a914 OP_3 OP_ROLL OP_CAT 88ac OP_CAT OP_EQUALVERIFY OP_0 OP_OUTPUTVALUE OP_INPUTINDEX OP_UTXOVALUE OP_4 OP_ROLL OP_SUB OP_NUMEQUAL OP_NIP OP_NIP OP_ENDIF OP_ENDIF",
+  "source": "pragma cashscript ^0.14.0;\n\n// Pact: stake BCH on your own goal.\n// The AI oracle has exactly one power: to give the stake BACK to its owner when the goal is met.\n// It can never send the money anywhere else. Only the owner (giving up) or the deadline can\n// send the stake to the beneficiary, so a stranger can't make anyone lose their stake.\ncontract Pact(\n    bytes20 ownerPkh,\n    bytes20 beneficiaryPkh,\n    pubkey oraclePk,\n    int deadline,\n    int fee\n) {\n    // Goal met: the oracle signed this exact outpoint + 0x01, so a verdict can't be replayed on\n    // another pact. No user signature: anyone holding the oracle's signature can broadcast it.\n    function release(datasig verdictSig) {\n        bytes msg = tx.inputs[this.activeInputIndex].outpointTransactionHash\n            + toPaddedBytes(tx.inputs[this.activeInputIndex].outpointIndex, 4)\n            + 0x01;\n        require(checkDataSig(verdictSig, msg, oraclePk));\n        require(tx.inputs.length == 1);\n        require(tx.outputs.length == 1);\n        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(ownerPkh));\n        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - fee);\n    }\n\n    // The owner gives up: the stake goes to the beneficiary. Needs the owner's own signature.\n    function forfeit(pubkey ownerPk, sig ownerSig) {\n        require(hash160(ownerPk) == ownerPkh);\n        require(checkSig(ownerSig, ownerPk));\n        require(tx.inputs.length == 1);\n        require(tx.outputs.length == 1);\n        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(beneficiaryPkh));\n        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - fee);\n    }\n\n    // Deadline passed without a release: anyone can send the stake to the beneficiary.\n    // This path needs no oracle, so funds are never stuck if the oracle disappears.\n    function expire() {\n        require(tx.time >= deadline);\n        require(tx.inputs.length == 1);\n        require(tx.outputs.length == 1);\n        require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(beneficiaryPkh));\n        require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - fee);\n    }\n}\n",
+  "fingerprint": "472bbc3f5f1bc2048c75961b94bbe43b1d3bf63b06c271464e04e5f746af7aea",
   "debug": {
-    "bytecode": "5579009c63577a825188c0c8c0c954807e787e587a7c557abb7b785187637578677801008868c3519dc4519d00cd0376a9147b7e0288ac7e8800ccc0c6557a949d6d6d5167557a519d537ab175c3519dc4519d00cd0376a914537a7e0288ac7e8800ccc0c6547a949c777768",
-    "sourceMap": "16:4:33:5;;;;;:40:16:54;;;;;17:30:17:51;:20::76:1;18:38:18:59:0;:28::74:1;:76::77:0;:14::78:1;17:20;19:14:19:21:0;17:20:::1;20:29:20:39:0;;:41::44;:46::54;;:8::57:1;22:24:22:38:0;23:12:23:19;:23::27;:12:::1;:29:25:9:0;24:12:24:29:1;;25:15:27:9:0;26:20:26:27;:31::35;:12::37:1;25:15:27:9;29:16:29:32:0;:36::37;:8::39:1;30:16:30:33:0;:37::38;:8::40:1;31:27:31:28:0;:16::45:1;:49::80:0;:74::79;:49::80:1;;;:8::82;32:27:32:28:0;:16::35:1;:49::70:0;:39::77:1;:80::83:0;;:39:::1;:8::85;16:56:33:5;;;:4;37::43::0;;;;38:27:38:35;;:8::37:1;;39:16:39:32:0;:36::37;:8::39:1;40:16:40:33:0;:37::38;:8::40:1;41:27:41:28:0;:16::45:1;:49::89:0;:74::88;;:49::89:1;;;:8::91;42:27:42:28:0;:16::35:1;:49::70:0;:39::77:1;:80::83:0;;:39:::1;:8::85;37:22:43:5;;6:0:44:1",
+    "bytecode": "5579009c63c0c8c0c954807e517e577a7c547abbc3519dc4519d00cd0376a9147b7e0288ac7e8800ccc0c6547a949c777777675579519c635679a988567a567aadc3519dc4519d00cd0376a9147b7e0288ac7e8800ccc0c6547a949c77777767557a529d537ab175c3519dc4519d00cd0376a914537a7e0288ac7e8800ccc0c6547a949c77776868",
+    "sourceMap": "16:4:25:5;;;;;17:30:17:51;:20::76:1;18:38:18:59:0;:28::74:1;:76::77:0;:14::78:1;17:20;19:14:19:18:0;17:20:::1;20:29:20:39:0;;:41::44;:46::54;;:8::57:1;21:16:21:32:0;:36::37;:8::39:1;22:16:22:33:0;:37::38;:8::40:1;23:27:23:28:0;:16::45:1;:49::83:0;:74::82;:49::83:1;;;:8::85;24:27:24:28:0;:16::35:1;:49::70:0;:39::77:1;:80::83:0;;:39:::1;:8::85;16:41:25:5;;;:4;28::35::0;;;;;29:24:29:31;;:16::32:1;:8::46;30:25:30:33:0;;:35::42;;:8::45:1;31:16:31:32:0;:36::37;:8::39:1;32:16:32:33:0;:37::38;:8::40:1;33:27:33:28:0;:16::45:1;:49::89:0;:74::88;:49::89:1;;;:8::91;34:27:34:28:0;:16::35:1;:49::70:0;:39::77:1;:80::83:0;;:39:::1;:8::85;28:51:35:5;;;:4;39::45::0;;;;40:27:40:35;;:8::37:1;;41:16:41:32:0;:36::37;:8::39:1;42:16:42:33:0;:37::38;:8::40:1;43:27:43:28:0;:16::45:1;:49::89:0;:74::88;;:49::89:1;;;:8::91;44:27:44:28:0;:16::35:1;:49::70:0;:39::77:1;:80::83:0;;:39:::1;:8::85;39:22:45:5;;7:0:46:1;",
     "logs": [],
     "requires": [
       {
-        "ip": 29,
+        "ip": 24,
         "line": 20
       },
       {
-        "ip": 40,
-        "line": 26
+        "ip": 27,
+        "line": 21
       },
       {
-        "ip": 44,
-        "line": 29
+        "ip": 30,
+        "line": 22
+      },
+      {
+        "ip": 38,
+        "line": 23
       },
       {
         "ip": 47,
+        "line": 24
+      },
+      {
+        "ip": 59,
+        "line": 29
+      },
+      {
+        "ip": 64,
         "line": 30
       },
       {
-        "ip": 55,
+        "ip": 67,
         "line": 31
       },
       {
-        "ip": 63,
+        "ip": 70,
         "line": 32
       },
       {
-        "ip": 74,
-        "line": 38
-      },
-      {
         "ip": 78,
-        "line": 39
+        "line": 33
       },
       {
-        "ip": 81,
+        "ip": 87,
+        "line": 34
+      },
+      {
+        "ip": 97,
         "line": 40
       },
       {
-        "ip": 90,
+        "ip": 101,
         "line": 41
       },
       {
-        "ip": 99,
+        "ip": 104,
         "line": 42
+      },
+      {
+        "ip": 113,
+        "line": 43
+      },
+      {
+        "ip": 122,
+        "line": 44
       }
     ],
-    "sourceTags": "5:9:pv;94:95:sc"
+    "sourceTags": "42:44:sc;82:84:sc;117:118:sc"
   },
   "compiler": {
     "name": "cashc",

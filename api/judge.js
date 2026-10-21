@@ -4,8 +4,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { judge, oraclePubkey } from '../lib/oracle.js';
 
-export const config = { maxDuration: 60 };
-
 export default async function handler(req, res) {
   const privHex = process.env.ORACLE_PRIVKEY_HEX;
   if (req.method === 'GET') {

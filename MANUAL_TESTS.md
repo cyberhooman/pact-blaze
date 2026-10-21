@@ -7,7 +7,7 @@ The cloud build had no wallet, no faucet coins, no Claude API key and no access 
 - [ ] `cp .env.example .env`, then `npm run oracle-key` and paste `ORACLE_PRIVKEY_HEX` into `.env`.
 - [ ] Set `VITE_NETWORK=chipnet` and `VITE_FEE_ADDRESS` to a `bchtest:q...` address you control.
 - [ ] Optional: set `VITE_BENEFICIARIES="Friend=bchtest:q...,Charity=bchtest:q..."` using chipnet addresses you control (so you can see forfeits arrive).
-- [ ] Install **Cashonize** (0.9+) and switch it to chipnet. Get chipnet coins from a faucet (for example https://tbch.googol.cash) to its receive address.
+- [ ] Install **Cashonize** (0.9+) and switch it to chipnet. Get chipnet coins from a chipnet faucet to its receive address.
 - [ ] `npm run dev`, open http://localhost:5173. `curl localhost:5173/api/judge` returns `{"oraclePubkey":"02…/03…","photo":false}`.
 
 ## 1. Banner

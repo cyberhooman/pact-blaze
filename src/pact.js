@@ -1,6 +1,6 @@
 // Pact transaction helpers: pure, shared by the app and the tests.
 import { Contract, ElectrumNetworkProvider, TransactionBuilder, placeholderP2PKHUnlocker, placeholderPublicKey, placeholderSignature } from 'cashscript';
-import { encodeCashAddress, hexToBin } from '@bitauth/libauth';
+import { encodeCashAddress, hexToBin, stringify } from '@bitauth/libauth';
 import artifact from './Pact.json' with { type: 'json' };
 
 export const SETTLE_FEE = 1000n;   // covenant tx fee, paid from the stake on release/forfeit/expire
@@ -57,8 +57,11 @@ export function buildFunding({ utxos, contract, stake, goal, deadline, feeAddres
 }
 
 // What WizardConnect's manager.signTransaction() takes.
+// WizardConnect relays plain JSON, so BigInt/Uint8Array go in libauth's extended-JSON form
+// (`<bigint: Xn>`, `<Uint8Array: 0x..>`), which wallets decode; raw objects throw "Do not know how to serialize a BigInt".
 export function fundingSignRequest(funding, userPrompt = 'Stake on your Pact') {
-  return { transaction: funding.builder.generateWcTransactionObject({ broadcast: false, userPrompt }), inputPaths: funding.inputPaths };
+  const wc = funding.builder.generateWcTransactionObject({ broadcast: false, userPrompt });
+  return { transaction: JSON.parse(stringify(wc)), inputPaths: funding.inputPaths };
 }
 
 // Goal met: the oracle's signature releases the stake to the owner. No user signature needed.

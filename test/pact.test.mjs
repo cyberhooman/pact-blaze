@@ -6,6 +6,10 @@ import { secp256k1, hash160, binToHex, hexToBin, generatePrivateKey, decodeTrans
 import { makePact, buildFunding, fundingSignRequest, buildRelease, buildForfeit, forfeitSignRequest, buildExpire, platformFee, pkhAddress, encodeShare, decodeShare, DUST, SETTLE_FEE } from '../src/pact.js';
 import { oraclePubkey, signVerdict } from '../lib/oracle.js';
 import artifact from '../src/Pact.json' with { type: 'json' };
+import { parseExtendedJson } from '@wizardconnect/core';
+
+// What the wallet sees: the request after the relay's plain JSON.stringify, decoded with WizardConnect's parser.
+const wire = (r) => parseExtendedJson(JSON.stringify(r.transaction));
 
 // 0. The committed browser artifact matches the contract source.
 assert.equal(artifact.debug.bytecode, compileFile(new URL('../contracts/Pact.cash', import.meta.url)).debug.bytecode, 'run npm run compile');
@@ -33,7 +37,8 @@ const STAKE = 100_000n;
 const opts = { utxos: wallet, contract, stake: STAKE, goal: GOAL, deadline: DEADLINE, feeAddress, changeAddress: ownerAddr, provider };
 const req = fundingSignRequest(buildFunding(opts));
 assert.deepEqual(req.inputPaths, [[0, 'change', 3], [1, 'receive', 0]]); // largest first, stops when covered
-const { transaction: tx, sourceOutputs } = req.transaction;
+assert.doesNotThrow(() => JSON.stringify(req)); // the relay sends plain JSON
+const { transaction: tx, sourceOutputs } = wire(req);
 assert.equal(tx.inputs.length, 2); assert.equal(sourceOutputs.length, 2);
 assert.equal(req.transaction.broadcast, false);
 assert.equal(lockingBytecodeToCashAddress({ bytecode: tx.outputs[0].lockingBytecode, prefix: 'bchtest' }).address, contract.address);
@@ -76,9 +81,11 @@ utxo = await fundPact();
 const fReq = forfeitSignRequest(buildForfeit({ contract, utxo, ...params, network: N, provider }));
 assert.deepEqual(fReq.inputPaths, [[0, 'receive', 0]]);
 assert.equal(fReq.transaction.broadcast, false);
-const unlock = binToHex(fReq.transaction.transaction.inputs[0].unlockingBytecode);
+assert.doesNotThrow(() => JSON.stringify(fReq));
+const fWire = wire(fReq);
+const unlock = binToHex(fWire.transaction.inputs[0].unlockingBytecode);
 assert.ok(unlock.includes(binToHex(placeholderPublicKey())) && unlock.includes(binToHex(placeholderSignature())));
-assert.equal(fReq.transaction.sourceOutputs[0].contract.abiFunction.name, 'forfeit');
+assert.equal(fWire.sourceOutputs[0].contract.abiFunction.name, 'forfeit');
 // Signed for real (as the wallet would), it pays the beneficiary; a stranger's key can't.
 const forfeitWith = (k) => buildForfeit({ contract, utxo, ...params, network: N, provider,
   ownerPk: secp256k1.derivePublicKeyCompressed(k.priv), ownerSig: new SignatureTemplate(k.priv) }).builder.send();

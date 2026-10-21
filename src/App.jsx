@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ElectrumNetworkProvider } from 'cashscript';
 import { useWizardConnect, WizardConnectQRDialog } from '@wizardconnect/react';
-import { makePact, buildFunding, fundingSignRequest, buildSettle, buildExpire, platformFee, pkhAddress, encodeShare, decodeShare, SETTLE_FEE } from './pact.js';
+import { makePact, buildFunding, fundingSignRequest, buildRelease, buildForfeit, forfeitSignRequest, buildExpire, platformFee, pkhAddress, encodeShare, decodeShare, SETTLE_FEE } from './pact.js';
 import { ownerOf, walletUtxos, signAndSend, parseP2pkh } from './wallet.js';
 import { NETWORK, FEE_ADDRESS, BANNER, BENEFICIARIES, FALLBACK_BCH_USD, explorerTx, explorerAddress } from './config.js';
 
@@ -50,7 +50,7 @@ export default function App() {
         <button className="link" onClick={() => setWhy(true)}>Why the AI can't steal</button>
       </header>
       <main>
-        {share ? <PactPage key={share} share={share} usd={usd} /> : <Create wc={wc} usd={usd} />}
+        {share ? <PactPage key={share} share={share} usd={usd} wc={wc} /> : <Create wc={wc} usd={usd} />}
       </main>
       <footer>
         Pact runs on Bitcoin Cash {NETWORK}. Wallets: Cashonize, Paytaca (via WizardConnect).
@@ -195,7 +195,7 @@ async function resizeToJpeg(file, max = 1280) {
   return c.toDataURL('image/jpeg', 0.85).split(',')[1];
 }
 
-function PactPage({ share, usd }) {
+function PactPage({ share, usd, wc }) {
   const p = useMemo(() => { try { return decodeShare(share); } catch (e) { return { error: e.message }; } }, [share]);
   const contract = useMemo(() => (p.error ? null : makePact(p, provider)), [p]);
   const now = useNow();
@@ -223,6 +223,8 @@ function PactPage({ share, usd }) {
   const settled = Boolean(result?.payoutTxid || (utxo === null && seen));
   const owner = pkhAddress(p.ownerPkh, p.network), beneficiary = pkhAddress(p.beneficiaryPkh, p.network);
 
+  const save = (r) => { setResult(r); remember(p.txid, r); };
+
   async function run(mode, image) {
     setErr('');
     try {
@@ -232,12 +234,38 @@ function PactPage({ share, usd }) {
       const v = await r.json();
       if (!r.ok) throw new Error(v.error || `Oracle error ${r.status}`);
       if (v.oraclePubkey !== p.oraclePk) throw new Error('This oracle key does not match the one in the pact.');
-      const verdict = { ...v, mode };
-      setResult(verdict); remember(p.txid, verdict);
-      setBusy('Broadcasting the payout…');
-      const tx = await buildSettle({ contract, utxo, sig: v.sig, verdict: v.verdict, ownerPkh: p.ownerPkh, beneficiaryPkh: p.beneficiaryPkh, network: p.network, provider, fee: p.fee }).send();
-      const done = { ...verdict, payoutTxid: tx.txid };
-      setResult(done); remember(p.txid, done);
+      // A missed photo is unsigned: nothing to broadcast, the owner can try another photo.
+      if (!v.sig) return setResult({ ...v, mode });
+      save({ ...v, mode });
+      await release(v.sig, { ...v, mode });
+    } catch (e) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  // Goal met: broadcast the oracle-signed release. It can only pay the owner.
+  async function release(sig, verdict) {
+    setBusy('Broadcasting the payout…');
+    const tx = await buildRelease({ contract, utxo, sig, ownerPkh: p.ownerPkh, network: p.network, provider, fee: p.fee }).send();
+    save({ ...verdict, payoutTxid: tx.txid });
+  }
+
+  // Give up: the owner's own wallet signs the stake over to the beneficiary.
+  async function giveUp() {
+    setErr('');
+    if (!(wc.state === 'connected' && wc.manager)) {
+      setErr("Connect the owner's wallet, then press Give up again.");
+      return wc.connect();
+    }
+    if (!confirm('Give up? The stake goes to your beneficiary.')) return;
+    try {
+      if (ownerOf(wc.manager, p.network).pkh !== p.ownerPkh) throw new Error('This wallet is not the owner of this pact. Connect the wallet that staked it.');
+      const forfeit = buildForfeit({ contract, utxo, beneficiaryPkh: p.beneficiaryPkh, network: p.network, provider, fee: p.fee });
+      setBusy('Approve in your wallet…');
+      const payoutTxid = await signAndSend(wc.manager, provider, forfeitSignRequest(forfeit, `Give up: ${p.goal}`));
+      save({ verdict: 'missed', reason: 'The owner gave up. Their wallet signed the stake over to the beneficiary.', payoutTxid, mode: 'forfeit' });
     } catch (e) {
       setErr(e.message || String(e));
     } finally {
@@ -251,7 +279,7 @@ function PactPage({ share, usd }) {
       setBusy('Broadcasting the expiry…');
       const tx = await buildExpire({ contract, utxo, beneficiaryPkh: p.beneficiaryPkh, deadline: p.deadline, network: p.network, provider, fee: p.fee }).send();
       const done = { verdict: 'missed', reason: 'Deadline passed with no verdict. The covenant released the stake to the beneficiary.', payoutTxid: tx.txid, mode: 'expire' };
-      setResult(done); remember(p.txid, done);
+      save(done);
     } catch (e) {
       setErr(`Not spendable yet: the network clock (median time) runs about an hour behind. Try again later. (${e.message})`);
     } finally {
@@ -271,7 +299,7 @@ function PactPage({ share, usd }) {
         </div>
         <dl className="chain">
           <dt>Met</dt><dd><a href={explorerAddress(owner)} target="_blank" rel="noreferrer">{short(owner, 10)}</a> (owner)</dd>
-          <dt>Missed</dt><dd><a href={explorerAddress(beneficiary)} target="_blank" rel="noreferrer">{short(beneficiary, 10)}</a> (beneficiary)</dd>
+          <dt>Give up / deadline</dt><dd><a href={explorerAddress(beneficiary)} target="_blank" rel="noreferrer">{short(beneficiary, 10)}</a> (beneficiary)</dd>
           <dt>Stake tx</dt><dd><a href={explorerTx(p.txid)} target="_blank" rel="noreferrer">{short(p.txid, 8)}</a></dd>
           <dt>Covenant</dt><dd><a href={explorerAddress(contract.address)} target="_blank" rel="noreferrer">{short(contract.address, 10)}</a></dd>
         </dl>
@@ -288,9 +316,9 @@ function PactPage({ share, usd }) {
           </label>
           <div className="row2">
             <button className="secondary" disabled={!!busy} onClick={() => run('sample')}>Use sample proof (demo)</button>
-            <button className="danger" disabled={!!busy} onClick={() => confirm('Give up? The stake goes to your beneficiary.') && run('giveup')}>Give up</button>
+            <button className="danger" disabled={!!busy} onClick={giveUp}>Give up</button>
           </div>
-          <p className="muted">The demo sample proof always passes, so you can try the full flow without a photo.</p>
+          <p className="muted">The demo sample proof always passes, so you can try the full flow without a photo. Give up needs the owner's wallet to sign.</p>
         </div>
       )}
 
@@ -303,7 +331,7 @@ function PactPage({ share, usd }) {
       )}
 
       {result?.sig && !result.payoutTxid && utxo && (
-        <button className="primary" disabled={!!busy} onClick={() => run(result.mode)}>Retry payout</button>
+        <button className="primary" disabled={!!busy} onClick={() => release(result.sig, result).catch((e) => setErr(e.message || String(e))).finally(() => setBusy(''))}>Retry payout</button>
       )}
 
       {busy && <p className="busy">{busy}</p>}
@@ -324,13 +352,22 @@ const countdown = (s) => {
 
 function Verdict({ r, owner, beneficiary }) {
   const met = r.verdict === 'met';
+  if (!met && !r.payoutTxid) {
+    return (
+      <div className="card verdict missed">
+        <div className="stamp">NOT ACCEPTED</div>
+        <p className="reason">{r.reason}</p>
+        <p className="muted">Not accepted. Try another photo before the deadline.</p>
+      </div>
+    );
+  }
   return (
     <div className={`card verdict ${met ? 'met' : 'missed'}`}>
-      <div className="stamp">{met ? 'GOAL MET' : 'MISSED'}</div>
+      <div className="stamp">{met ? 'GOAL MET' : r.mode === 'forfeit' ? 'GAVE UP' : 'MISSED'}</div>
       <p className="reason">{r.reason}</p>
       {r.mode === 'sample' && <p className="muted">Demo sample proof: no photo was judged.</p>}
       <dl className="chain">
-        {r.oraclePubkey && <><dt>Signed by</dt><dd className="mono">oracle {short(r.oraclePubkey, 4)}</dd></>}
+        {met && r.oraclePubkey && <><dt>Signed by</dt><dd className="mono">oracle {short(r.oraclePubkey, 4)}</dd></>}
         <dt>Pays</dt><dd>{met ? `owner ${short(owner, 10)}` : `beneficiary ${short(beneficiary, 10)}`}</dd>
         <dt>Payout tx</dt><dd>{r.payoutTxid ? <a href={explorerTx(r.payoutTxid)} target="_blank" rel="noreferrer">{short(r.payoutTxid, 8)} ↗</a> : 'pending…'}</dd>
       </dl>
@@ -338,12 +375,21 @@ function Verdict({ r, owner, beneficiary }) {
   );
 }
 
-const CODE = `require(checkDataSig(verdictSig, outpoint + verdict, oraclePk));
-bytes20 payee = (verdict == 0x01) ? ownerPkh : beneficiaryPkh;
-require(tx.outputs.length == 1);
-require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(payee));
-require(tx.outputs[0].value == tx.inputs[0].value - fee);
-function expire() { require(tx.time >= deadline); /* pays beneficiary */ }`;
+const PITCH = "The AI's only power is to give your money back. Only you, or the deadline, can send it to your beneficiary.";
+
+const CODE = `function release(datasig verdictSig) {   // the AI: goal met
+  require(checkDataSig(verdictSig, outpoint + 0x01, oraclePk));
+  require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(ownerPkh));
+}
+function forfeit(pubkey ownerPk, sig ownerSig) {   // you: give up
+  require(hash160(ownerPk) == ownerPkh && checkSig(ownerSig, ownerPk));
+  require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(beneficiaryPkh));
+}
+function expire() {   // the clock: deadline passed
+  require(tx.time >= deadline);
+  require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(beneficiaryPkh));
+}
+// every path: 1 input, 1 output, value == stake - fee`;
 
 function WhyModal({ onClose }) {
   useEffect(() => { const k = (e) => e.key === 'Escape' && onClose(); addEventListener('keydown', k); return () => removeEventListener('keydown', k); }, [onClose]);
@@ -352,13 +398,15 @@ function WhyModal({ onClose }) {
       <div className="modal" role="dialog" aria-label="Why the AI can't steal" onClick={(e) => e.stopPropagation()}>
         <button className="close" onClick={onClose} aria-label="Close">×</button>
         <h2>Why the AI can't steal</h2>
-        <p>The AI never holds the money. It only signs one byte: <b>met</b> or <b>missed</b>. The covenant, fixed when you stake, decides where each answer pays. These lines from <code>Pact.cash</code> (simplified) do the work:</p>
+        <p className="pitch"><b>{PITCH}</b></p>
+        <p>The AI never holds the money. It can only sign "met" for one coin, and the covenant, fixed when you stake, lets that signature pay only the owner. These lines from <code>Pact.cash</code> (simplified) do the work:</p>
         <pre><code>{CODE}</code></pre>
         <ul>
           <li><b>A cheater only cheats themselves.</b> Fake proof just returns your own money to you.</li>
+          <li><b>No one can make you lose.</b> Sending the stake to the beneficiary needs your own wallet signature, or the deadline. A rejected photo sends nothing; you can try again.</li>
           <li><b>The worst case is a wrong verdict, never theft.</b> Every path ends at the owner or the beneficiary you named.</li>
           <li><b>Funds are never stuck.</b> After the deadline, <code>expire</code> pays the beneficiary with no oracle at all.</li>
-          <li><b>No replay.</b> The signature covers this exact coin, so it can't settle another pact.</li>
+          <li><b>No replay.</b> The signature covers this exact coin, so it can't release another pact.</li>
           <li><b>Single oracle key today.</b> A multisig oracle (several judges) is the upgrade path.</li>
         </ul>
       </div>

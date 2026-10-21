@@ -2,7 +2,10 @@
 // GET  /api/judge -> {oraclePubkey, photo}  (the app bakes this key into each new pact)
 // POST /api/judge -> {verdict, reason, sig, oraclePubkey}  (sig is null unless verdict is "met")
 import Anthropic from '@anthropic-ai/sdk';
+import { chainProvider } from '../src/pact.js';
 import { judge, oraclePubkey } from '../lib/oracle.js';
+
+const provider = chainProvider(process.env.VITE_NETWORK === 'mainnet' ? 'mainnet' : 'chipnet');
 
 export default async function handler(req, res) {
   const privHex = process.env.ORACLE_PRIVKEY_HEX;
@@ -16,6 +19,7 @@ export default async function handler(req, res) {
     if (typeof body === 'string') { try { body = JSON.parse(body); } catch { return res.status(400).json({ error: 'Body must be JSON.' }); } }
     const { status, body: out } = await judge(body, {
       privHex,
+      provider,
       client: process.env.ANTHROPIC_API_KEY ? new Anthropic() : null,
       allowSample: process.env.DISABLE_SAMPLE !== '1',
     });

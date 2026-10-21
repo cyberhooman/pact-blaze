@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ElectrumNetworkProvider } from 'cashscript';
 import { useWizardConnect, WizardConnectQRDialog } from '@wizardconnect/react';
-import { makePact, buildFunding, fundingSignRequest, buildRelease, buildForfeit, forfeitSignRequest, buildExpire, platformFee, pkhAddress, encodeShare, decodeShare, SETTLE_FEE } from './pact.js';
+import { chainProvider, makePact, buildFunding, fundingSignRequest, buildRelease, buildForfeit, forfeitSignRequest, buildExpire, platformFee, pkhAddress, encodeShare, decodeShare, SETTLE_FEE } from './pact.js';
 import { ownerOf, walletUtxos, signAndSend, parseP2pkh } from './wallet.js';
 import { NETWORK, FEE_ADDRESS, BANNER, BENEFICIARIES, FALLBACK_BCH_USD, explorerTx, explorerAddress } from './config.js';
 
-const provider = new ElectrumNetworkProvider(NETWORK);
+const provider = chainProvider(NETWORK);
 const short = (s, n = 6) => (s && s.length > 2 * n + 1 ? `${s.slice(0, n)}…${s.slice(-n)}` : s);
 const fmtSats = (s) => Number(s).toLocaleString('en-US');
 const fmtUsd = (sats, usd) => `$${((Number(sats) / 1e8) * usd).toFixed(2)}`;
@@ -230,7 +229,8 @@ function PactPage({ share, usd, wc }) {
     try {
       setBusy(mode === 'photo' ? 'Claude is looking at your photo…' : 'Asking the oracle…');
       const r = await fetch('/api/judge', { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ txid: p.txid, vout: p.vout, goal: p.goal, deadline: p.deadline, mode, image }) });
+        body: JSON.stringify({ txid: p.txid, vout: p.vout, goal: p.goal, deadline: p.deadline, mode, image,
+          ownerPkh: p.ownerPkh, beneficiaryPkh: p.beneficiaryPkh, fee: String(p.fee) }) });
       const v = await r.json();
       if (!r.ok) throw new Error(v.error || `Oracle error ${r.status}`);
       if (v.oraclePubkey !== p.oraclePk) throw new Error('This oracle key does not match the one in the pact.');

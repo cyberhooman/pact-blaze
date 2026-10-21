@@ -1,5 +1,5 @@
 // Pact transaction helpers: pure, shared by the app and the tests.
-import { Contract, TransactionBuilder, placeholderP2PKHUnlocker, placeholderPublicKey, placeholderSignature } from 'cashscript';
+import { Contract, ElectrumNetworkProvider, TransactionBuilder, placeholderP2PKHUnlocker, placeholderPublicKey, placeholderSignature } from 'cashscript';
 import { encodeCashAddress, hexToBin } from '@bitauth/libauth';
 import artifact from './Pact.json' with { type: 'json' };
 
@@ -8,6 +8,10 @@ export const DUST = 546n;
 export const MAX_GOAL_BYTES = 120;
 const FEE_RATE = 1;                // sats/byte for the funding tx
 const FUNDING_MARGIN = 2000n;      // enough miner fee for a funding tx with several inputs
+
+// CashScript's default chipnet server (chipnet.bch.ninja) refused connections on 2026-10-21; imaginary.cash answered.
+export const chainProvider = (network) =>
+  new ElectrumNetworkProvider(network, network === 'chipnet' ? { hostname: 'chipnet.imaginary.cash' } : undefined);
 
 export const prefixOf = (network) => (network === 'mainnet' ? 'bitcoincash' : 'bchtest');
 export const pkhAddress = (pkh, network) =>

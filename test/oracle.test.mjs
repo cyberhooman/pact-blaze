@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { Contract, MockNetworkProvider, TransactionBuilder, randomUtxo } from 'cashscript';
 import { secp256k1, hash160, hexToBin, binToHex, generatePrivateKey, encodeCashAddress } from '@bitauth/libauth';
-import { judge, oraclePubkey, SAMPLE_REASON } from '../lib/oracle.js';
+import { judge, oraclePubkey, SAMPLE_REASON, MAX_PHOTOS_PER_PACT } from '../lib/oracle.js';
 import artifact from '../src/Pact.json' with { type: 'json' };
 
 const key = () => { const priv = generatePrivateKey(); return { priv, pkh: hash160(secp256k1.derivePublicKeyCompressed(priv)) }; };
@@ -25,8 +25,9 @@ const mockClient = (input, extra = {}) => {
   return { calls, beta: { messages: { create: async (p) => { calls.push(p); return { stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'record_verdict', input }], ...extra }; } } } };
 };
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
-const req = (u, extra) => ({ txid: u.txid, vout: u.vout, goal: 'run 5 km', deadline: DEADLINE, ...extra });
-const run = (u, extra, client = null, now = NOW) => judge(req(u, extra), { privHex, client, now });
+const terms = { ownerPkh: binToHex(owner.pkh), beneficiaryPkh: binToHex(beneficiary.pkh), fee: String(FEE) };
+const req = (u, extra) => ({ txid: u.txid, vout: u.vout, goal: 'run 5 km', deadline: DEADLINE, ...terms, ...extra });
+const run = (u, extra, client = null, now = NOW) => judge(req(u, extra), { privHex, client, now, provider });
 
 // 1. Photo judged "met" releases to the owner; the request carried the image and the untrusted-data rule.
 let u = fund();
@@ -72,7 +73,7 @@ r = await run(u, { mode: 'sample' }, client);
 assert.equal(r.body.verdict, 'met'); assert.equal(r.body.reason, SAMPLE_REASON); assert.equal(client.calls.length, 0);
 await release(u, r.body.sig, p2pkh(owner.pkh));
 assert.equal((await run(u, { mode: 'giveup' })).status, 400);
-assert.equal((await judge(req(u, { mode: 'sample' }), { privHex, now: NOW, allowSample: false })).status, 403);
+assert.equal((await judge(req(fund(), { mode: 'sample' }), { privHex, now: NOW, provider, allowSample: false })).status, 403);
 
 // 5. Deadline: the oracle refuses to sign at or after it.
 r = await run(u, { mode: 'sample' }, null, DEADLINE);
@@ -80,9 +81,35 @@ assert.equal(r.status, 409); assert.equal(r.body.sig, undefined);
 
 // 6. No API key: photo is a clear 503, sample still works. Bad input is a 400.
 assert.equal((await run(u, { mode: 'photo', image: PNG })).status, 503);
-assert.equal((await run(u, { mode: 'sample' })).status, 200);
+assert.equal((await run(fund(), { mode: 'sample' })).status, 200);
 assert.equal((await run(u, { mode: 'photo', image: 'R0lGODlh' }, mockClient({}))).status, 400);
 assert.equal((await run({ txid: 'zz', vout: 0 }, { mode: 'sample' })).status, 400);
 assert.equal((await judge(req(u, { mode: 'sample' }), { privHex: '', now: NOW })).status, 500);
 
-console.log('oracle OK: met releases to owner only, missed unsigned, injection, sample, no giveup, deadline, no-key 503');
+// 7. Only live pacts reach the AI: made-up, mis-described or already-settled pacts get a 404 and cost nothing.
+client = mockClient({ verdict: 'met', reason: 'x' });
+assert.equal((await run(randomUtxo(), { mode: 'photo', image: PNG }, client)).status, 404); // never funded
+u = fund();
+assert.equal((await run(u, { mode: 'photo', image: PNG, beneficiaryPkh: binToHex(thief.pkh) }, client)).status, 404); // wrong terms
+assert.equal((await run(u, { mode: 'photo', image: PNG, deadline: DEADLINE + 86400 }, client)).status, 404); // lying about the deadline
+assert.equal((await run(other, { mode: 'photo', image: PNG }, client)).status, 200); // still live
+assert.equal(client.calls.length, 1);
+r = await run(u, { mode: 'sample' });
+await release(u, r.body.sig, p2pkh(owner.pkh));
+assert.equal((await run(u, { mode: 'photo', image: PNG }, client)).status, 404); // settled
+assert.equal(client.calls.length, 1);
+
+// 8. Photo checks are capped per pact, so one real pact can't drain the API credit.
+u = fund(); client = mockClient({ verdict: 'missed', reason: 'Not it.' });
+for (let i = 0; i < MAX_PHOTOS_PER_PACT; i++) assert.equal((await run(u, { mode: 'photo', image: PNG }, client)).status, 200);
+assert.equal((await run(u, { mode: 'photo', image: PNG }, client)).status, 429);
+assert.equal(client.calls.length, MAX_PHOTOS_PER_PACT);
+assert.equal((await run(u, { mode: 'sample' })).status, 200); // sample proof is free and not capped
+
+// 9. Chain unreachable: a clear 503, no AI call, no signature.
+const down = { network: 'chipnet', getUtxos: async () => { throw new Error('electrum down'); } };
+client = mockClient({ verdict: 'met', reason: 'x' });
+r = await judge(req(fund(), { mode: 'photo', image: PNG }), { privHex, client, now: NOW, provider: down });
+assert.equal(r.status, 503); assert.equal(client.calls.length, 0);
+
+console.log('oracle OK: met releases to owner only, missed unsigned, injection, sample, no giveup, deadline, no-key 503, live-pact check, photo cap');

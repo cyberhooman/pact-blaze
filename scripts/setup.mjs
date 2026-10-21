@@ -1,20 +1,28 @@
 // One-time local setup. Run: npm run setup
 // - creates .env from .env.example if missing
 // - creates the oracle signing key if missing (never overwrites it: every pact is bound to it)
-// - asks for your Anthropic API key with hidden input and saves it; the key is never printed
+// - takes your Anthropic API key from the clipboard (or a hidden paste), asks Anthropic whether
+//   it is valid, and saves it. The key is never printed.
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import Anthropic from '@anthropic-ai/sdk';
 import { generatePrivateKey, binToHex } from '@bitauth/libauth';
 import { oraclePubkey } from '../lib/oracle.js';
 
 const envPath = process.argv[2] ?? new URL('../.env', import.meta.url);
-const KEY_RE = /sk-ant-api\d\d-[A-Za-z0-9_-]{20,}/;
+const KEY_RE = /sk-ant-[A-Za-z0-9_-]{20,}/; // loose on purpose: Anthropic, not this regex, decides validity
 
 const getEnv = (text, key) => text.match(new RegExp(`^${key}=(.*)$`, 'm'))?.[1].trim() ?? '';
 const setEnv = (text, key, value) => (new RegExp(`^${key}=.*$`, 'm').test(text)
   ? text.replace(new RegExp(`^${key}=.*$`, 'm'), () => `${key}=${value}`)
   : `${text.replace(/\n?$/, '\n')}${key}=${value}\n`);
 
-// Read one line without echoing it (paste works: right-click or Ctrl+V in the terminal).
+const clipboard = () => {
+  if (process.platform !== 'win32') return '';
+  try { return execFileSync('powershell', ['-NoProfile', '-Command', 'Get-Clipboard'], { encoding: 'utf8' }); } catch { return ''; }
+};
+
+// Read one line without echoing it.
 function askHidden(question) {
   process.stdout.write(question);
   const stdin = process.stdin;
@@ -37,6 +45,15 @@ function askHidden(question) {
   });
 }
 
+// Ask Anthropic (free models list call). Returns 'ok' | 'rejected' | 'unknown'.
+async function checkKey(apiKey) {
+  try { await new Anthropic({ apiKey, maxRetries: 0 }).models.list({ limit: 1 }); return 'ok'; }
+  catch (e) {
+    if (e instanceof Anthropic.AuthenticationError || e instanceof Anthropic.PermissionDeniedError) return 'rejected';
+    return 'unknown';
+  }
+}
+
 let env = existsSync(envPath) ? readFileSync(envPath, 'utf8') : readFileSync(new URL('../.env.example', import.meta.url), 'utf8');
 
 if (!getEnv(env, 'ORACLE_PRIVKEY_HEX')) {
@@ -48,26 +65,27 @@ if (!getEnv(env, 'ORACLE_PRIVKEY_HEX')) {
   console.log(`Oracle key already set (public key ${oraclePubkey(getEnv(env, 'ORACLE_PRIVKEY_HEX'))}), left unchanged.`);
 }
 
-const current = getEnv(env, 'ANTHROPIC_API_KEY');
-const pasted = await askHidden(`Paste your Anthropic API key${current ? ' (Enter keeps the saved one)' : ' (Enter to skip)'}: `);
-const key = pasted.match(KEY_RE)?.[0];
-if (!pasted) {
-  console.log(current ? 'Kept the saved Anthropic key.' : 'Skipped. Photo judging stays off; sample proof and Give up still work.');
-} else if (!key) {
-  // Say what arrived without revealing it: length plus the non-secret prefix only.
-  const prefix = pasted.match(/^sk-ant-[a-z]+\d*-/)?.[0];
-  console.log(`Nothing saved. Received ${pasted.length} characters, ${prefix ? `starting with "${prefix}"` : 'not starting with "sk-ant-"'}.`);
-  if (/[\u0000-\u001f]/.test(pasted) || pasted.length < 20) {
-    console.log('The paste did not come through. Run it again and paste with a RIGHT-CLICK in the window (not Ctrl+V).');
-  } else if (prefix && !prefix.startsWith('sk-ant-api')) {
-    console.log(`"${prefix}" is not an API key (it is a different kind of Claude token). API keys start with "sk-ant-api03-".`);
-    console.log('Create one at console.anthropic.com > Settings > API Keys > Create Key.');
-  } else {
-    console.log('API keys start with "sk-ant-api03-". Create one at console.anthropic.com > Settings > API Keys.');
-  }
+const pasted = await askHidden('Copy your Anthropic API key, then press Enter here (or paste it, then Enter): ');
+const fromClipboard = !pasted;
+const source = fromClipboard ? clipboard() : pasted;
+const key = source.match(KEY_RE)?.[0];
+
+if (!key) {
+  const where = fromClipboard ? 'Your clipboard' : 'What you pasted';
+  console.log(`${where} has no Anthropic key in it (${source.trim().length} characters, no "sk-ant-..."). Nothing saved.`);
+  if (fromClipboard) console.log('Copy the key from console.anthropic.com > Settings > API Keys, then run npm run setup again.');
 } else {
-  env = setEnv(env, 'ANTHROPIC_API_KEY', key);
-  console.log(`Anthropic key saved (ends in ...${key.slice(-4)}).`);
+  process.stdout.write(`Found a key ending in ...${key.slice(-4)}${fromClipboard ? ' on your clipboard' : ''}. Checking it with Anthropic... `);
+  const status = await checkKey(key);
+  if (status === 'rejected') {
+    console.log('rejected.');
+    console.log('Anthropic says this key is not valid (wrong kind of token, revoked, or mistyped). Nothing saved.');
+    console.log('Create a new one at console.anthropic.com > Settings > API Keys > Create Key ("Continue with an API key").');
+  } else {
+    console.log(status === 'ok' ? 'valid.' : 'could not reach Anthropic, saved anyway.');
+    env = setEnv(env, 'ANTHROPIC_API_KEY', key);
+    console.log('Anthropic key saved. If photo judging later says "unavailable", add credit under Settings > Billing.');
+  }
 }
 
 writeFileSync(envPath, env);

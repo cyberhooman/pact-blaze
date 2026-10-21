@@ -54,8 +54,17 @@ const key = pasted.match(KEY_RE)?.[0];
 if (!pasted) {
   console.log(current ? 'Kept the saved Anthropic key.' : 'Skipped. Photo judging stays off; sample proof and Give up still work.');
 } else if (!key) {
-  console.log(`That doesn't look like a Console API key (they start with "sk-ant-api03-"). Nothing saved.`);
-  console.log('Create one at console.anthropic.com > Settings > API Keys.');
+  // Say what arrived without revealing it: length plus the non-secret prefix only.
+  const prefix = pasted.match(/^sk-ant-[a-z]+\d*-/)?.[0];
+  console.log(`Nothing saved. Received ${pasted.length} characters, ${prefix ? `starting with "${prefix}"` : 'not starting with "sk-ant-"'}.`);
+  if (/[\u0000-\u001f]/.test(pasted) || pasted.length < 20) {
+    console.log('The paste did not come through. Run it again and paste with a RIGHT-CLICK in the window (not Ctrl+V).');
+  } else if (prefix && !prefix.startsWith('sk-ant-api')) {
+    console.log(`"${prefix}" is not an API key (it is a different kind of Claude token). API keys start with "sk-ant-api03-".`);
+    console.log('Create one at console.anthropic.com > Settings > API Keys > Create Key.');
+  } else {
+    console.log('API keys start with "sk-ant-api03-". Create one at console.anthropic.com > Settings > API Keys.');
+  }
 } else {
   env = setEnv(env, 'ANTHROPIC_API_KEY', key);
   console.log(`Anthropic key saved (ends in ...${key.slice(-4)}).`);

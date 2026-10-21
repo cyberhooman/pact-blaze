@@ -77,6 +77,18 @@ function Banner() {
   );
 }
 
+// A stale WizardConnect session (e.g. after a page refresh) leaves a request unanswered with no error, so say what to do.
+function WalletWaitHint({ busy }) {
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    setLate(false);
+    if (!busy.startsWith('Approve in your wallet')) return;
+    const t = setTimeout(() => setLate(true), 20_000);
+    return () => clearTimeout(t);
+  }, [busy]);
+  return late ? <p className="muted">Nothing in your wallet? Open its Connect tab. If the request isn't there, disconnect here and connect again.</p> : null;
+}
+
 function Create({ wc, usd }) {
   const defaultDeadline = useMemo(() => {
     const d = new Date(Date.now() + 7 * 864e5); d.setMinutes(0, 0, 0);
@@ -173,6 +185,7 @@ function Create({ wc, usd }) {
           </button>
         )}
         {connected && <p className="muted">Connected to {wc.walletName || 'wallet'} · <button className="link" onClick={wc.disconnect}>disconnect</button></p>}
+        <WalletWaitHint busy={busy} />
         {(err || wc.error) && <p className="error">{err || wc.error}</p>}
       </div>
 
@@ -335,6 +348,7 @@ function PactPage({ share, usd, wc }) {
       )}
 
       {busy && <p className="busy">{busy}</p>}
+      <WalletWaitHint busy={busy} />
       {err && <p className="error">{err}</p>}
 
       {result && <Verdict r={result} owner={owner} beneficiary={beneficiary} />}

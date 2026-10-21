@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node contracts/test.mjs && node test/oracle.test.mjs",
+    "test": "node contracts/test.mjs && node test/oracle.test.mjs && node test/pact.test.mjs",
     "compile": "node scripts/compile.mjs"
   },
   "dependencies": {

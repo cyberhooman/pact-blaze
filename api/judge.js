@@ -1,6 +1,6 @@
 // Vercel Node function.
 // GET  /api/judge -> {oraclePubkey, photo}  (the app bakes this key into each new pact)
-// POST /api/judge -> {verdict, reason, sig, oraclePubkey}
+// POST /api/judge -> {verdict, reason, sig, oraclePubkey}  (sig is null unless verdict is "met")
 import Anthropic from '@anthropic-ai/sdk';
 import { judge, oraclePubkey } from '../lib/oracle.js';
 
@@ -21,7 +21,7 @@ export default async function handler(req, res) {
     });
     res.status(status).json(out);
   } catch (e) {
-    if (e instanceof Anthropic.APIError) return res.status(502).json({ error: `AI judge unavailable (${e.status}). Try again or use Give up.` });
+    if (e instanceof Anthropic.APIError) return res.status(502).json({ error: `AI judge unavailable (${e.status}). Try again before the deadline.` });
     res.status(500).json({ error: 'Oracle error.' });
   }
 }

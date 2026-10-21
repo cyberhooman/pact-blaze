@@ -1,9 +1,9 @@
 // Pact transaction helpers: pure, shared by the app and the tests.
-import { Contract, TransactionBuilder, placeholderP2PKHUnlocker } from 'cashscript';
+import { Contract, TransactionBuilder, placeholderP2PKHUnlocker, placeholderPublicKey, placeholderSignature } from 'cashscript';
 import { encodeCashAddress, hexToBin } from '@bitauth/libauth';
 import artifact from './Pact.json' with { type: 'json' };
 
-export const SETTLE_FEE = 1000n;   // covenant tx fee, paid from the stake on settle/expire
+export const SETTLE_FEE = 1000n;   // covenant tx fee, paid from the stake on release/forfeit/expire
 export const DUST = 546n;
 export const MAX_GOAL_BYTES = 120;
 const FEE_RATE = 1;                // sats/byte for the funding tx
@@ -57,12 +57,25 @@ export function fundingSignRequest(funding, userPrompt = 'Stake on your Pact') {
   return { transaction: funding.builder.generateWcTransactionObject({ broadcast: false, userPrompt }), inputPaths: funding.inputPaths };
 }
 
-// Settle with the oracle's signature: pays owner (met) or beneficiary (missed). No user signature.
-export function buildSettle({ contract, utxo, sig, verdict, ownerPkh, beneficiaryPkh, network, provider, fee = SETTLE_FEE }) {
-  const met = verdict === 'met';
+// Goal met: the oracle's signature releases the stake to the owner. No user signature needed.
+export function buildRelease({ contract, utxo, sig, ownerPkh, network, provider, fee = SETTLE_FEE }) {
   return new TransactionBuilder({ provider })
-    .addInput(utxo, contract.unlock.settle(hexToBin(sig), Uint8Array.of(met ? 1 : 0)))
-    .addOutput({ to: pkhAddress(met ? ownerPkh : beneficiaryPkh, network), amount: utxo.satoshis - BigInt(fee) });
+    .addInput(utxo, contract.unlock.release(hexToBin(sig)))
+    .addOutput({ to: pkhAddress(ownerPkh, network), amount: utxo.satoshis - BigInt(fee) });
+}
+
+// Give up: the owner's wallet signs the stake over to the beneficiary. The owner key is receive/0.
+// ownerPk/ownerSig default to wallet placeholders; tests pass a real key and SignatureTemplate.
+export function buildForfeit({ contract, utxo, beneficiaryPkh, network, provider, fee = SETTLE_FEE,
+  ownerPk = placeholderPublicKey(), ownerSig = placeholderSignature() }) {
+  const builder = new TransactionBuilder({ provider })
+    .addInput(utxo, contract.unlock.forfeit(ownerPk, ownerSig))
+    .addOutput({ to: pkhAddress(beneficiaryPkh, network), amount: utxo.satoshis - BigInt(fee) });
+  return { builder, inputPaths: [[0, 'receive', 0]] };
+}
+
+export function forfeitSignRequest(forfeit, userPrompt = 'Give up: send the stake to your beneficiary') {
+  return fundingSignRequest(forfeit, userPrompt);
 }
 
 // After the deadline anyone can send the stake to the beneficiary (nodes check locktime against MTP).

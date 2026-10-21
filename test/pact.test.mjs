@@ -1,9 +1,9 @@
-// Funding/settle/expire helpers against MockNetworkProvider. No network. Run: npm test
+// Funding/release/forfeit/expire helpers against MockNetworkProvider. No network. Run: npm test
 import assert from 'node:assert/strict';
 import { compileFile } from 'cashc';
-import { MockNetworkProvider, SignatureTemplate, randomUtxo } from 'cashscript';
+import { MockNetworkProvider, SignatureTemplate, randomUtxo, placeholderPublicKey, placeholderSignature } from 'cashscript';
 import { secp256k1, hash160, binToHex, hexToBin, generatePrivateKey, decodeTransactionUnsafe, cashAddressToLockingBytecode, lockingBytecodeToCashAddress } from '@bitauth/libauth';
-import { makePact, buildFunding, fundingSignRequest, buildSettle, buildExpire, platformFee, pkhAddress, encodeShare, decodeShare, DUST, SETTLE_FEE } from '../src/pact.js';
+import { makePact, buildFunding, fundingSignRequest, buildRelease, buildForfeit, forfeitSignRequest, buildExpire, platformFee, pkhAddress, encodeShare, decodeShare, DUST, SETTLE_FEE } from '../src/pact.js';
 import { oraclePubkey, signVerdict } from '../lib/oracle.js';
 import artifact from '../src/Pact.json' with { type: 'json' };
 
@@ -52,22 +52,38 @@ assert.throws(() => buildFunding({ ...opts, goal: 'x'.repeat(121) }), /1-120 byt
 assert.throws(() => buildFunding({ ...opts, stake: 200_000n }), /Not enough BCH/);
 assert.throws(() => buildFunding({ ...opts, stake: 5_000n }), /at least/);
 
-// 4. Round trip: fund (signed as the wallet would), oracle signs, settle pays the right side.
+// 4. Round trip: fund (signed as the wallet would), then release (oracle) or forfeit (owner).
 const signer = new SignatureTemplate(owner.priv);
-const fundAndSettle = async (verdict) => {
+const payee = (hex) => {
+  const out = decodeTransactionUnsafe(hexToBin(hex)).outputs;
+  assert.equal(out.length, 1); assert.equal(out[0].valueSatoshis, STAKE - SETTLE_FEE);
+  return lockingBytecodeToCashAddress({ bytecode: out[0].lockingBytecode, prefix: 'bchtest' }).address;
+};
+const fundPact = async () => {
   provider.addUtxo(ownerAddr, randomUtxo({ satoshis: 200_000n }));
   const utxos = (await provider.getUtxos(ownerAddr)).map((u) => ({ ...u, address: ownerAddr, path: 'receive', index: 0 }));
   const { txid } = await buildFunding({ ...opts, utxos, unlockerFor: () => signer.unlockP2PKH() }).builder.send();
   const utxo = (await contract.getUtxos()).find((u) => u.txid === txid && u.vout === 0);
   assert.equal(utxo.satoshis, STAKE);
-  const sig = signVerdict(oracleHex, txid, 0, verdict);
-  const settle = await buildSettle({ contract, utxo, sig, verdict, ...params, network: N, provider }).send();
-  const out = decodeTransactionUnsafe(hexToBin(settle.hex)).outputs;
-  assert.equal(out.length, 1); assert.equal(out[0].valueSatoshis, STAKE - SETTLE_FEE);
-  return lockingBytecodeToCashAddress({ bytecode: out[0].lockingBytecode, prefix: 'bchtest' }).address;
+  return utxo;
 };
-assert.equal(await fundAndSettle('met'), ownerAddr);
-assert.equal(await fundAndSettle('missed'), pkhAddress(beneficiary.pkh, N));
+let utxo = await fundPact();
+const rel = await buildRelease({ contract, utxo, sig: signVerdict(oracleHex, utxo.txid, 0), ...params, network: N, provider }).send();
+assert.equal(payee(rel.hex), ownerAddr);
+
+// Forfeit: the wallet sign request carries placeholders for the owner key and signature at receive/0.
+utxo = await fundPact();
+const fReq = forfeitSignRequest(buildForfeit({ contract, utxo, ...params, network: N, provider }));
+assert.deepEqual(fReq.inputPaths, [[0, 'receive', 0]]);
+assert.equal(fReq.transaction.broadcast, false);
+const unlock = binToHex(fReq.transaction.transaction.inputs[0].unlockingBytecode);
+assert.ok(unlock.includes(binToHex(placeholderPublicKey())) && unlock.includes(binToHex(placeholderSignature())));
+assert.equal(fReq.transaction.sourceOutputs[0].contract.abiFunction.name, 'forfeit');
+// Signed for real (as the wallet would), it pays the beneficiary; a stranger's key can't.
+const forfeitWith = (k) => buildForfeit({ contract, utxo, ...params, network: N, provider,
+  ownerPk: secp256k1.derivePublicKeyCompressed(k.priv), ownerSig: new SignatureTemplate(k.priv) }).builder.send();
+await assert.rejects(forfeitWith(feeKey));
+assert.equal(payee((await forfeitWith(owner)).hex), pkhAddress(beneficiary.pkh, N));
 
 // 5. Expire: only at/after the deadline, always to the beneficiary.
 const u = provider.addUtxo(contract.address, randomUtxo({ satoshis: STAKE }));
@@ -82,4 +98,4 @@ assert.equal(back.goal, GOAL); assert.equal(back.stake, STAKE); assert.equal(bac
 assert.equal(makePact(back, provider).address, contract.address);
 assert.throws(() => decodeShare(encodeShare({ ...share, txid: 'nope' })), /Bad share link/);
 
-console.log(`pact OK: sign request, 1% fee, OP_RETURN, settle met/missed, expire, share link`);
+console.log(`pact OK: sign request, 1% fee, OP_RETURN, release, forfeit, expire, share link`);

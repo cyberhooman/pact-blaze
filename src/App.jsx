@@ -166,12 +166,14 @@ function Create({ wc, usd }) {
 
         <label>
           <span className="lbl">If I miss it, the stake goes to</span>
-          <div className="chips">
-            {BENEFICIARIES.map((b) => (
-              <button key={b.label} type="button" disabled={!b.address} title={b.address || 'Set VITE_BENEFICIARIES'}
-                className={benef === b.address && b.address ? 'chip on' : 'chip'} onClick={() => setBenef(b.address)}>{b.label}</button>
-            ))}
-          </div>
+          {BENEFICIARIES.some((b) => b.address) && (
+            <div className="chips">
+              {BENEFICIARIES.filter((b) => b.address).map((b) => (
+                <button key={b.label} type="button" title={b.address}
+                  className={benef === b.address ? 'chip on' : 'chip'} onClick={() => setBenef(b.address)}>{b.label}</button>
+              ))}
+            </div>
+          )}
           <input className="mono" value={benef} onChange={(e) => setBenef(e.target.value)} placeholder={NETWORK === 'mainnet' ? 'bitcoincash:q…' : 'bchtest:q…'} />
         </label>
 

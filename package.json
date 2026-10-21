@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "oracle-key": "node scripts/new-oracle-key.mjs"
+    "oracle-key": "node scripts/new-oracle-key.mjs",
+    "setup": "node scripts/setup.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.137.0",

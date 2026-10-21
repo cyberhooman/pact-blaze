@@ -57,7 +57,7 @@ export default function App() {
       {why && <WhyModal onClose={() => setWhy(false)} />}
       {wc.uri && wc.qrUri && (
         <WizardConnectQRDialog show={wc.state === 'connecting'} onClose={wc.disconnect} uri={wc.uri} qrUri={wc.qrUri}
-          subtitle="Scan with Cashonize or Paytaca"
+          subtitle="Scan with Paytaca, or Cashonize using an HD wallet (Connect tab, paste the link)"
           theme={{ dialogBackground: '#f6f1e7', headerBackground: '#f6f1e7', titleColor: '#17130e', subtitleColor: '#5b5146', borderColor: '#d8cdbb', uriRowBackground: '#ece4d4', uriTextColor: '#5b5146', closeButtonColor: '#17130e', copyButtonColor: '#17130e' }} />
       )}
     </>

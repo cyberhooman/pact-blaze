@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { compileFile } from 'cashc';
 import { MockNetworkProvider, SignatureTemplate, randomUtxo, placeholderPublicKey, placeholderSignature } from 'cashscript';
 import { secp256k1, hash160, binToHex, hexToBin, generatePrivateKey, decodeTransactionUnsafe, cashAddressToLockingBytecode, lockingBytecodeToCashAddress } from '@bitauth/libauth';
-import { makePact, buildFunding, fundingSignRequest, buildRelease, buildForfeit, forfeitSignRequest, buildExpire, platformFee, pkhAddress, encodeShare, decodeShare, DUST, SETTLE_FEE } from '../src/pact.js';
+import { makePact, readPactNote, pactFromFunding, pactStatus, buildFunding, fundingSignRequest, buildRelease, buildForfeit, forfeitSignRequest, buildExpire, platformFee, pkhAddress, encodeShare, decodeShare, DUST, SETTLE_FEE } from '../src/pact.js';
 import { oraclePubkey, signVerdict } from '../lib/oracle.js';
 import artifact from '../src/Pact.json' with { type: 'json' };
 import { parseExtendedJson } from '@wizardconnect/core';
@@ -105,4 +105,29 @@ assert.equal(back.goal, GOAL); assert.equal(back.stake, STAKE); assert.equal(bac
 assert.equal(makePact(back, provider).address, contract.address);
 assert.throws(() => decodeShare(encodeShare({ ...share, txid: 'nope' })), /Bad share link/);
 
-console.log(`pact OK: sign request, 1% fee, OP_RETURN, release, forfeit, expire, share link`);
+// 7. "Your pacts": the funding note names beneficiary + oracle, so the owner's wallet can rebuild the pact from the chain.
+let fund = await fundPact();
+const fundHex = await provider.getRawTransaction(fund.txid);
+const note = decodeTransactionUnsafe(hexToBin(fundHex)).outputs.map((o) => readPactNote(o.lockingBytecode)).find(Boolean);
+assert.deepEqual(note, { goal: GOAL, deadline: DEADLINE, beneficiaryPkh: params.beneficiaryPkh, oraclePk: params.oraclePk });
+const rebuilt = pactFromFunding(fundHex, fund.txid, params.ownerPkh, N, provider);
+assert.equal(makePact(rebuilt, provider).address, contract.address);
+assert.equal(rebuilt.goal, GOAL); assert.equal(rebuilt.stake, STAKE); assert.equal(rebuilt.txid, fund.txid);
+assert.equal(pactFromFunding(fundHex, fund.txid, binToHex(feeKey.pkh), N, provider), null); // not this wallet's pact
+const oldNote = Uint8Array.from([0x6a, 4, ...new TextEncoder().encode('PACT'), 2, ...new TextEncoder().encode('hi'), 10, ...new TextEncoder().encode(String(DEADLINE))]);
+assert.deepEqual(readPactNote(oldNote), { goal: 'hi', deadline: DEADLINE }); // pre-2026-10-22 pacts: no beneficiary, not rebuildable
+assert.equal(readPactNote(hexToBin('76a914' + '00'.repeat(20) + '88ac')), null);
+
+// Status: live while the coin sits at the covenant, then who got it.
+const ours = { ...rebuilt, network: N };
+const history = (txids) => async () => txids.map((tx_hash) => ({ tx_hash }));
+assert.equal(await pactStatus(ours, provider, history([])), 'live');
+const returned = await buildRelease({ contract, utxo: fund, sig: signVerdict(oracleHex, fund.txid, 0), ...params, network: N, provider }).send();
+assert.equal(await pactStatus(ours, provider, history([fund.txid, returned.txid])), 'returned');
+fund = await fundPact();
+const gone = await buildForfeit({ contract, utxo: fund, ...params, network: N, provider,
+  ownerPk: secp256k1.derivePublicKeyCompressed(owner.priv), ownerSig: new SignatureTemplate(owner.priv) }).builder.send();
+assert.equal(await pactStatus({ ...ours, txid: fund.txid }, provider, history([fund.txid, returned.txid, gone.txid])), 'forfeited');
+assert.equal(await pactStatus({ ...ours, txid: 'ab'.repeat(32) }, provider, history([])), 'pending');
+
+console.log(`pact OK: sign request, 1% fee, OP_RETURN, release, forfeit, expire, share link, your-pacts rebuild + status`);

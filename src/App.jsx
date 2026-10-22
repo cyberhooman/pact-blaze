@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useWizardConnect, WizardConnectQRDialog } from '@wizardconnect/react';
-import { chainProvider, makePact, buildFunding, fundingSignRequest, buildRelease, buildForfeit, forfeitSignRequest, buildExpire, platformFee, pkhAddress, encodeShare, decodeShare, SETTLE_FEE } from './pact.js';
-import { ownerOf, walletUtxos, signAndSend, parseP2pkh } from './wallet.js';
+import { chainProvider, pactStatus, makePact, buildFunding, fundingSignRequest, buildRelease, buildForfeit, forfeitSignRequest, buildExpire, platformFee, pkhAddress, encodeShare, decodeShare, SETTLE_FEE } from './pact.js';
+import { ownerOf, walletUtxos, walletPacts, electrumHistory, signAndSend, parseP2pkh } from './wallet.js';
 import { NETWORK, FEE_ADDRESS, BANNER, BENEFICIARIES, FALLBACK_BCH_USD, explorerTx, explorerAddress } from './config.js';
 
 const provider = chainProvider(NETWORK);
@@ -12,6 +12,9 @@ const fmtUsd = (sats, usd) => `$${((Number(sats) / 1e8) * usd).toFixed(2)}`;
 // Small per-browser memory of verdicts and payout txids; the chain is the source of truth.
 const remember = (txid, v) => { try { localStorage.setItem(`pact:${txid}`, JSON.stringify(v)); } catch {} };
 const recall = (txid) => { try { return JSON.parse(localStorage.getItem(`pact:${txid}`)); } catch { return null; } };
+// Every pact created or opened in this browser, so leaving the page never loses one.
+const savedShares = () => { try { return JSON.parse(localStorage.getItem('pacts') || '[]'); } catch { return []; } };
+const savePact = (share) => { try { const l = savedShares(); if (!l.includes(share)) localStorage.setItem('pacts', JSON.stringify([share, ...l].slice(0, 50))); } catch {} };
 
 function useHash() {
   const [hash, setHash] = useState(location.hash);
@@ -74,6 +77,52 @@ function Banner() {
         Vote EMBER2026: <code>{short(BANNER.vote, 10)}</code>
       </button>
     </div>
+  );
+}
+
+const STATUS = { live: ['Live', 'live'], pending: ['Confirming', 'live'], returned: ['Returned to you', 'met'], forfeited: ['Went to beneficiary', 'missed'] };
+
+// "Your pacts": every pact opened in this browser, plus (wallet connected) every pact the wallet funded, read from the chain.
+function MyPacts({ wc }) {
+  const connected = wc.state === 'connected' && wc.manager;
+  const [fromChain, setFromChain] = useState([]);
+  const [scanning, setScanning] = useState(false);
+  const [status, setStatus] = useState({});
+  useEffect(() => {
+    if (!connected) return;
+    setScanning(true);
+    walletPacts(wc.manager, provider, NETWORK).then(setFromChain).catch(() => {}).finally(() => setScanning(false));
+  }, [connected]);
+  const pacts = useMemo(() => {
+    const local = savedShares().map((s) => { try { return decodeShare(s); } catch { return null; } }).filter(Boolean);
+    const seen = new Set();
+    return [...local, ...fromChain].filter((p) => p.network === NETWORK && !seen.has(p.txid) && seen.add(p.txid))
+      .sort((a, b) => b.deadline - a.deadline);
+  }, [fromChain]);
+  useEffect(() => {
+    for (const p of pacts) {
+      if (!status[p.txid]) pactStatus(p, provider, electrumHistory(provider)).then((st) => setStatus((x) => ({ ...x, [p.txid]: st }))).catch(() => {});
+    }
+  }, [pacts]);
+  if (!pacts.length && !scanning) return null;
+  return (
+    <section className="card mypacts">
+      <h2>Your pacts</h2>
+      {scanning && <p className="busy">Reading your wallet's pacts from the chain…</p>}
+      <ul>
+        {pacts.map((p) => {
+          const [label, cls] = STATUS[status[p.txid]] || ['Checking', 'live'];
+          return (
+            <li key={p.txid}>
+              <a href={`#/p/${encodeShare(p)}`}>{p.goal}</a>
+              <span className="muted">{fmtSats(p.stake)} sats · until {new Date(p.deadline * 1000).toLocaleString()}</span>
+              <span className={`tag ${cls}`}>{label}</span>
+            </li>
+          );
+        })}
+      </ul>
+      {!connected && <p className="muted">Connect your wallet to also find pacts you made on other devices.</p>}
+    </section>
   );
 }
 
@@ -191,6 +240,8 @@ function Create({ wc, usd }) {
         {(err || wc.error) && <p className="error">{err || wc.error}</p>}
       </div>
 
+      <MyPacts wc={wc} />
+
       <ol className="steps">
         <li><span><b>Stake.</b> One wallet approval locks your BCH in a covenant.</span></li>
         <li><span><b>Prove it.</b> Upload a photo. Claude looks at it and signs a verdict.</span></li>
@@ -220,6 +271,7 @@ function PactPage({ share, usd, wc }) {
   const [seen, setSeen] = useState(false); // the stake has been seen at the covenant at least once
 
   useEffect(() => { if (utxo) setSeen(true); }, [utxo]);
+  useEffect(() => { if (!p.error) savePact(share); }, [share]);
   useEffect(() => {
     if (!contract) return;
     let live = true;

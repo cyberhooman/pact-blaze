@@ -1,6 +1,6 @@
 // WizardConnect wallet adapter: derive addresses from the wallet's xpubs, find UTXOs, sign, broadcast.
 import { hash160, binToHex, decodeCashAddress } from '@bitauth/libauth';
-import { pkhAddress, prefixOf } from './pact.js';
+import { pkhAddress, prefixOf, pactFromFunding } from './pact.js';
 
 const SCAN = [['receive', 0, 10], ['change', 1, 5]]; // [path, childIndex, addresses to scan]
 
@@ -11,7 +11,7 @@ export function ownerOf(manager, network) {
   return { pkh: binToHex(pkh), address: pkhAddress(pkh, network) };
 }
 
-export async function walletUtxos(manager, provider, network) {
+function walletSlots(manager, network) {
   const slots = [];
   for (const [path, child, n] of SCAN) {
     for (let i = 0; i < n; i++) {
@@ -19,8 +19,26 @@ export async function walletUtxos(manager, provider, network) {
       if (pk) slots.push({ path, index: i, address: pkhAddress(hash160(pk), network) });
     }
   }
+  return slots;
+}
+
+export async function walletUtxos(manager, provider, network) {
+  const slots = walletSlots(manager, network);
   const lists = await Promise.all(slots.map((s) => provider.getUtxos(s.address)));
   return lists.flatMap((utxos, i) => utxos.map((u) => ({ ...u, ...slots[i] })));
+}
+
+export const electrumHistory = (provider) => (address) => provider.performRequest('blockchain.address.get_history', address);
+
+// Every pact this wallet funded, rebuilt from the chain: works on any device, no account needed.
+// ponytail: scans the newest 40 wallet txs; page further back if wallets get busy.
+export async function walletPacts(manager, provider, network) {
+  const owner = ownerOf(manager, network);
+  const rows = (await Promise.all(walletSlots(manager, network).map((s) => electrumHistory(provider)(s.address)))).flat();
+  const order = (h) => (h.height > 0 ? h.height : Infinity); // unconfirmed = newest
+  const txids = [...new Set(rows.sort((a, b) => order(a) - order(b)).map((r) => r.tx_hash))].slice(-40);
+  const raws = await Promise.all(txids.map((t) => provider.getRawTransaction(t)));
+  return raws.map((hex, i) => pactFromFunding(hex, txids[i], owner.pkh, network, provider)).filter(Boolean);
 }
 
 export async function signAndSend(manager, provider, request) {

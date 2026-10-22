@@ -137,3 +137,17 @@ h3 { font: 600 20px var(--serif); margin: 0 0 12px; }
   .card { padding: 18px; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+
+/* Your pacts */
+.mypacts { margin-top: 20px; }
+.mypacts h2 { font: 600 22px var(--serif); margin: 0 0 12px; }
+.mypacts ul { list-style: none; padding: 0; margin: 0 0 8px; display: grid; gap: 10px; }
+.mypacts li { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding-bottom: 10px; border-bottom: 1px solid var(--rule); }
+.mypacts li:last-child { border-bottom: 0; padding-bottom: 0; }
+.mypacts li a { color: var(--ink); font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
+.mypacts li a:hover { text-decoration: underline; }
+.mypacts li .muted { grid-column: 1; font-size: 13px; }
+.tag { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.tag.live { color: var(--ink-2); }
+.tag.met { color: var(--green); }
+.tag.missed { color: var(--seal); }

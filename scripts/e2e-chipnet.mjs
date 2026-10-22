@@ -5,7 +5,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { SignatureTemplate, TransactionBuilder } from 'cashscript';
 import { secp256k1, hash160, binToHex, hexToBin, generatePrivateKey, decodeCashAddress } from '@bitauth/libauth';
-import { chainProvider, makePact, buildFunding, buildRelease, buildForfeit, pkhAddress, SETTLE_FEE } from '../src/pact.js';
+import { chainProvider, makePact, buildFunding, buildRelease, buildForfeit, pkhAddress, pactFromFunding, SETTLE_FEE } from '../src/pact.js';
 
 const BASE = process.argv[2] ?? 'https://bchblaze-pact.vercel.app';
 const NET = 'chipnet';
@@ -58,6 +58,8 @@ async function stake(goal) {
     if (!utxo) await new Promise((r) => setTimeout(r, 1500));
   }
   check('stake lands in the covenant', Boolean(utxo), txLink(txid));
+  const found = pactFromFunding(await provider.getRawTransaction(txid), txid, ownerPkh, NET, provider);
+  check('the pact can be rebuilt from its funding tx alone', found && makePact(found, provider).address === contract.address);
   return { contract, utxo, req: { txid, vout: utxo.vout, goal, deadline, ownerPkh, beneficiaryPkh, fee: String(SETTLE_FEE) } };
 }
 

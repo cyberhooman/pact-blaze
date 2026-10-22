@@ -1,6 +1,6 @@
 // Pact transaction helpers: pure, shared by the app and the tests.
 import { Contract, ElectrumNetworkProvider, TransactionBuilder, placeholderP2PKHUnlocker, placeholderPublicKey, placeholderSignature } from 'cashscript';
-import { encodeCashAddress, hexToBin, stringify } from '@bitauth/libauth';
+import { encodeCashAddress, hexToBin, binToHex, stringify, decodeTransactionUnsafe, lockingBytecodeToCashAddress } from '@bitauth/libauth';
 import artifact from './Pact.json' with { type: 'json' };
 
 export const SETTLE_FEE = 1000n;   // covenant tx fee, paid from the stake on release/forfeit/expire
@@ -50,10 +50,60 @@ export function buildFunding({ utxos, contract, stake, goal, deadline, feeAddres
   builder
     .addOutput({ to: contract.address, amount: stake })
     .addOutput({ to: feeAddress, amount: fee })
-    .addOpReturnOutput(['PACT', goal, String(deadline)])
+    // The note also names the beneficiary and oracle (constructor args 1 and 2), so the owner's wallet
+    // can rebuild every pact it funded from the chain alone, on any device.
+    .addOpReturnOutput(['PACT', goal, String(deadline),
+      `0x${binToHex(contract.encodedConstructorArgs[1])}`, `0x${binToHex(contract.encodedConstructorArgs[2])}`])
     .addBchChangeOutputIfNeeded({ to: changeAddress, feeRate: FEE_RATE });
   const inputPaths = picked.map((u, i) => [i, u.path, u.index]);
   return { builder, inputPaths, fee, stakeVout: 0 };
+}
+
+// Read a funding tx's note: PACT <goal> <deadline> [<beneficiaryPkh> <oraclePk>] (pacts before 2026-10-22 lack the last two).
+export function readPactNote(bytecode) {
+  if (bytecode[0] !== 0x6a) return null;
+  const parts = [];
+  for (let i = 1; i < bytecode.length;) {
+    let n = bytecode[i++];
+    if (n === 0x4c) n = bytecode[i++];
+    else if (n > 0x4b) return null; // our notes only use direct pushes and PUSHDATA1
+    parts.push(bytecode.slice(i, i + n)); i += n;
+  }
+  const text = (b) => new TextDecoder().decode(b);
+  if (parts.length < 3 || text(parts[0]) !== 'PACT') return null;
+  const note = { goal: text(parts[1]), deadline: Number(text(parts[2])) };
+  if (parts[3]?.length === 20 && parts[4]?.length === 33) Object.assign(note, { beneficiaryPkh: binToHex(parts[3]), oraclePk: binToHex(parts[4]) });
+  return note;
+}
+
+const cashAddress = (bytecode, network) => {
+  const r = lockingBytecodeToCashAddress({ bytecode, prefix: prefixOf(network) });
+  return typeof r === 'string' ? null : r.address;
+};
+
+// Rebuild a pact (share params) from its funding tx. ownerPkh is the wallet scanning its own history;
+// the note supplies the rest, and the rebuilt covenant must match output 0 or it isn't this owner's pact.
+export function pactFromFunding(txHex, txid, ownerPkh, network, provider) {
+  const tx = decodeTransactionUnsafe(hexToBin(txHex));
+  const note = tx.outputs.map((o) => readPactNote(o.lockingBytecode)).find(Boolean);
+  if (!note?.beneficiaryPkh || !Number.isInteger(note.deadline)) return null;
+  const params = { ownerPkh, beneficiaryPkh: note.beneficiaryPkh, oraclePk: note.oraclePk, deadline: note.deadline, fee: SETTLE_FEE };
+  if (cashAddress(tx.outputs[0].lockingBytecode, network) !== makePact(params, provider).address) return null;
+  return { ...params, network, goal: note.goal, stake: tx.outputs[0].valueSatoshis, txid, vout: 0 };
+}
+
+// 'live' (coin still at the covenant), 'returned' (paid to the owner), 'forfeited' (paid to the beneficiary),
+// or 'pending' (not visible yet). history(address) returns Electrum get_history rows.
+export async function pactStatus(p, provider, history) {
+  const contract = makePact(p, provider);
+  if ((await contract.getUtxos()).some((u) => u.txid === p.txid && u.vout === Number(p.vout))) return 'live';
+  for (const h of await history(contract.address)) {
+    if (h.tx_hash === p.txid) continue;
+    const tx = decodeTransactionUnsafe(hexToBin(await provider.getRawTransaction(h.tx_hash)));
+    if (!tx.inputs.some((i) => binToHex(i.outpointTransactionHash) === p.txid && i.outpointIndex === Number(p.vout))) continue;
+    return cashAddress(tx.outputs[0].lockingBytecode, p.network) === pkhAddress(p.ownerPkh, p.network) ? 'returned' : 'forfeited';
+  }
+  return 'pending';
 }
 
 // What WizardConnect's manager.signTransaction() takes.

@@ -6,7 +6,11 @@ export const FEE_ADDRESS = env.VITE_FEE_ADDRESS || '';
 export const BANNER = {
   slides: env.VITE_SLIDES_URL || '#slides-coming-soon',
   repo: env.VITE_REPO_URL || 'https://github.com/cyberhooman/pact-blaze',
-  vote: env.VITE_VOTE_ADDRESS || 'bitcoincash:zVOTE-ADDRESS-PLACEHOLDER',
+  vote: env.VITE_VOTE_ADDRESS || 'bitcoincash:zpr2waldp42mzs2wquq26v6vy6ks7n8dvcl9x3pt8l',
+  // BLAZE rule: pre-existing work shows its before demo and before code next to the new ones.
+  beforeDemo: 'https://bchblaze-pact.vercel.app',
+  beforeCode: 'https://github.com/cyberhooman/pact-blaze/tree/before-blaze',
+  changes: 'https://github.com/cyberhooman/pact-blaze/blob/main/CHANGELOG.md',
 };
 // "Label=address,Label=address". Empty addresses show as disabled chips.
 export const BENEFICIARIES = (env.VITE_BENEFICIARIES || 'A charity=,A friend=')

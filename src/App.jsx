@@ -78,8 +78,12 @@ function Banner() {
     <div className="banner">
       <span className="tag">BCH BLAZE 2026</span>
       <a href={BANNER.slides} target="_blank" rel="noreferrer">Slides</a>
-      <a href={BANNER.repo} target="_blank" rel="noreferrer">GitHub</a>
-      <button className="vote" title="Copy the EMBER2026 vote address" onClick={() => navigator.clipboard?.writeText(BANNER.vote)}>
+      <a href={BANNER.repo} target="_blank" rel="noreferrer">Code</a>
+      <span className="muted">Before BLAZE:</span>
+      <a href={BANNER.beforeDemo} target="_blank" rel="noreferrer">demo</a>
+      <a href={BANNER.beforeCode} target="_blank" rel="noreferrer">code</a>
+      <a href={BANNER.changes} target="_blank" rel="noreferrer">What's new</a>
+      <button className="vote" title="Copy the EMBER2026 vote address (CashTokens)" onClick={() => navigator.clipboard?.writeText(BANNER.vote)}>
         Vote EMBER2026: <code>{short(BANNER.vote, 10)}</code>
       </button>
     </div>

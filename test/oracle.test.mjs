@@ -74,6 +74,15 @@ assert.equal(r.body.verdict, 'met'); assert.equal(r.body.reason, SAMPLE_REASON);
 await release(u, r.body.sig, p2pkh(owner.pkh));
 assert.equal((await run(u, { mode: 'giveup' })).status, 400);
 assert.equal((await judge(req(fund(), { mode: 'sample' }), { privHex, now: NOW, provider, allowSample: false })).status, 403);
+// Mainnet cap: sample proof opens only tiny pacts (BCH by sats, tokens by units); bigger ones need a photo.
+const cap = { sats: STAKE, units: 100n };
+const capped = (u) => judge(req(u, { mode: 'sample' }), { privHex, now: NOW, provider, sampleCap: cap });
+assert.equal((await capped(fund())).status, 200); // exactly at the cap
+assert.equal((await capped(provider.addUtxo(pact.address, randomUtxo({ satoshis: STAKE + 1n })))).status, 403);
+const tokenPact = (amount) => provider.addUtxo(pact.tokenAddress, randomUtxo({ satoshis: 2000n, token: { category: 'ab'.repeat(32), amount } }));
+assert.equal((await capped(tokenPact(100n))).status, 200);
+const big = await capped(tokenPact(101n));
+assert.equal(big.status, 403); assert.match(big.body.error, /real photo/);
 
 // 5. Deadline: the oracle refuses to sign at or after it.
 r = await run(u, { mode: 'sample' }, null, DEADLINE);

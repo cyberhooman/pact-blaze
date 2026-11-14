@@ -1,17 +1,23 @@
 // Vercel Node function.
-// GET  /api/judge -> {oraclePubkey, photo}  (the app bakes this key into each new pact)
+// GET  /api/judge -> {oraclePubkey, photo, sampleCap}  (the app bakes this key into each new pact)
 // POST /api/judge -> {verdict, reason, sig, oraclePubkey}  (sig is null unless verdict is "met")
 import Anthropic from '@anthropic-ai/sdk';
 import { chainProvider } from '../src/pact.js';
 import { judge, oraclePubkey } from '../lib/oracle.js';
 
-const provider = chainProvider(process.env.VITE_NETWORK === 'mainnet' ? 'mainnet' : 'chipnet');
+const mainnet = process.env.VITE_NETWORK === 'mainnet';
+const provider = chainProvider(mainnet ? 'mainnet' : 'chipnet');
+// Mainnet: sample proof only for tiny demo pacts, about $0.50 of BCH or 1.00 PUSD (100 units, 2 decimals).
+const sampleCap = mainnet
+  ? { sats: BigInt(process.env.SAMPLE_MAX_SATS || Math.round(0.5 / Number(process.env.VITE_BCH_USD || 400) * 1e8)), units: 100n }
+  : null;
 
 export default async function handler(req, res) {
   const privHex = process.env.ORACLE_PRIVKEY_HEX;
   if (req.method === 'GET') {
     if (!privHex) return res.status(500).json({ error: 'Oracle key is not configured (ORACLE_PRIVKEY_HEX).' });
-    return res.status(200).json({ oraclePubkey: oraclePubkey(privHex), photo: Boolean(process.env.ANTHROPIC_API_KEY) });
+    return res.status(200).json({ oraclePubkey: oraclePubkey(privHex), photo: Boolean(process.env.ANTHROPIC_API_KEY),
+      sampleCap: sampleCap && { sats: String(sampleCap.sats), units: String(sampleCap.units) } });
   }
   if (req.method !== 'POST') return res.status(405).json({ error: 'GET or POST only.' });
   try {
@@ -22,6 +28,7 @@ export default async function handler(req, res) {
       provider,
       client: process.env.ANTHROPIC_API_KEY ? new Anthropic() : null,
       allowSample: process.env.DISABLE_SAMPLE !== '1',
+      sampleCap,
     });
     res.status(status).json(out);
   } catch (e) {

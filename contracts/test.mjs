@@ -19,6 +19,8 @@ const FEE = 1000n;
 const STAKE = 100_000n;
 
 const provider = new MockNetworkProvider();
+// An attacker builds raw txs, so the test builder may burn tokens: only the covenant gets to say no.
+const BURN_OK = { allowImplicitFungibleTokenBurn: true };
 const pact = new Contract(artifact, [owner.pkh, beneficiary.pkh, oracle.pk, BigInt(DEADLINE), FEE], { provider });
 
 // What the oracle signs: outpoint txid (internal byte order) || outpoint index (4-byte LE) || 0x01.
@@ -30,7 +32,7 @@ const sign = (msg, priv = oracle.priv) => secp256k1.signMessageHashSchnorr(priv,
 
 const fund = () => provider.addUtxo(pact.address, randomUtxo({ satoshis: STAKE }));
 const tx = (utxo, unlocker, outputs, locktime) => {
-  const b = new TransactionBuilder({ provider }).addInput(utxo, unlocker).addOutputs(outputs);
+  const b = new TransactionBuilder({ provider, ...BURN_OK }).addInput(utxo, unlocker).addOutputs(outputs);
   if (locktime !== undefined) b.setLocktime(locktime);
   return b.send();
 };
@@ -77,5 +79,56 @@ u = fund();
 await assert.rejects(tx(u, pact.unlock.expire(), pay(beneficiary.pkh), DEADLINE - 1));
 await assert.rejects(tx(u, pact.unlock.expire(), pay(owner.pkh), DEADLINE));
 await tx(u, pact.unlock.expire(), pay(beneficiary.pkh), DEADLINE);
+
+// 6. Every exit, the same attacks: skim value, add an output, add an input, and for token pacts drop,
+// burn, split or swap the token (a fresh genesis from the stake outpoint), or rewrite an NFT commitment.
+const PUSD = 'ab'.repeat(32), TOKEN_STAKE = 500n, TOKEN_SATS = 2000n;
+const tokAddr = (pkh) => encodeCashAddress({ prefix: 'bchtest', type: 'p2pkhWithTokens', payload: pkh }).address;
+const fundToken = (token = { category: PUSD, amount: TOKEN_STAKE }, vout) => {
+  const r = randomUtxo({ satoshis: TOKEN_SATS, token });
+  return provider.addUtxo(pact.tokenAddress, vout === undefined ? r : { ...r, vout });
+};
+const payTok = (pkh, token = { category: PUSD, amount: TOKEN_STAKE }) => [{ to: tokAddr(pkh), amount: TOKEN_SATS - FEE, token }];
+const exits = {
+  release: { unlock: (x) => pact.unlock.release(sign(verdictMessage(x.txid, x.vout))), to: owner.pkh },
+  forfeit: { unlock: () => pact.unlock.forfeit(owner.pk, new SignatureTemplate(owner.priv)), to: beneficiary.pkh },
+  expire: { unlock: () => pact.unlock.expire(), to: beneficiary.pkh, locktime: DEADLINE },
+};
+for (const [name, e] of Object.entries(exits)) {
+  const go = (x, outputs) => tx(x, e.unlock(x), outputs, e.locktime);
+  const no = (p, what) => assert.rejects(p, `${name}: ${what} should fail`);
+  let x = fund();
+  await no(go(x, pay(e.to, STAKE - FEE - 5000n)), 'skim to miners');
+  await no(go(x, [...pay(e.to, STAKE - FEE - 5000n), ...pay(thief.pkh, 4000n)]), 'skim to a thief');
+  await no(go(x, [...pay(e.to), ...pay(thief.pkh, 546n)]), 'extra output');
+  const y = fund(), b2 = new TransactionBuilder({ provider, ...BURN_OK }).addInput(x, e.unlock(x)).addInput(y, e.unlock(y)).addOutputs(pay(e.to));
+  if (e.locktime) b2.setLocktime(e.locktime);
+  await no(b2.send(), 'two pacts into one payout');
+  const b3 = new TransactionBuilder({ provider, ...BURN_OK }).addInput(x, e.unlock(x)).addOutputs(pay(e.to)).addOpReturnOutput(['spam']);
+  if (e.locktime) b3.setLocktime(e.locktime);
+  await no(b3.send(), 'extra zero-value output');
+  await go(x, pay(e.to));
+
+  x = fundToken(undefined, 0);
+  await no(go(x, pay(e.to, TOKEN_SATS - FEE)), 'drop the token');
+  await no(go(x, payTok(e.to, { category: PUSD, amount: TOKEN_STAKE - 1n })), 'burn 1 unit');
+  await no(go(x, [...payTok(e.to, { category: PUSD, amount: TOKEN_STAKE - 100n }),
+    { to: tokAddr(thief.pkh), amount: 700n, token: { category: PUSD, amount: 100n } }]), 'split to a thief');
+  await no(go(x, payTok(e.to, { category: x.txid, amount: TOKEN_STAKE })), 'swap PUSD for a fresh look-alike token');
+  await no(go(x, payTok(thief.pkh)), 'pay a thief');
+  await go(x, payTok(e.to));
+
+  const nft = { category: PUSD, amount: 0n, nft: { capability: 'mutable', commitment: 'aa' } };
+  x = fundToken(nft);
+  await no(go(x, payTok(e.to, { ...nft, nft: { ...nft.nft, commitment: 'bb' } })), 'rewrite the NFT');
+  await go(x, payTok(e.to, nft));
+}
+
+// A BCH pact can't pick up a token from a second input on the way out.
+u = fund();
+const extra = provider.addUtxo(p2pkh(owner.pkh), randomUtxo({ satoshis: 10_000n, token: { category: PUSD, amount: 1n } }));
+await assert.rejects(new TransactionBuilder({ provider })
+  .addInput(u, pact.unlock.expire()).addInput(extra, new SignatureTemplate(owner.priv).unlockP2PKH())
+  .addOutputs([{ to: tokAddr(beneficiary.pkh), amount: STAKE - FEE, token: { category: PUSD, amount: 1n } }]).setLocktime(DEADLINE).send());
 
 console.log(`Pact OK: ${pact.address} (${pact.bytesize} bytes, ${pact.opcount} ops)`);

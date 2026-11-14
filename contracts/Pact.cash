@@ -1,9 +1,11 @@
 pragma cashscript ^0.14.0;
 
-// Pact: stake BCH on your own goal.
+// Pact: stake BCH or a CashToken (PUSD) on your own goal.
 // The AI oracle has exactly one power: to give the stake BACK to its owner when the goal is met.
 // It can never send the money anywhere else. Only the owner (giving up) or the deadline can
 // send the stake to the beneficiary, so a stranger can't make anyone lose their stake.
+// Every exit keeps the input's token (category, amount, NFT commitment) on the one output.
+// A BCH-only pact has no token, so the same rules pass with empty values: one contract for both.
 contract Pact(
     bytes20 ownerPkh,
     bytes20 beneficiaryPkh,
@@ -22,6 +24,9 @@ contract Pact(
         require(tx.outputs.length == 1);
         require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(ownerPkh));
         require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - fee);
+        require(tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);
+        require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);
+        require(tx.outputs[0].nftCommitment == tx.inputs[this.activeInputIndex].nftCommitment);
     }
 
     // The owner gives up: the stake goes to the beneficiary. Needs the owner's own signature.
@@ -32,6 +37,9 @@ contract Pact(
         require(tx.outputs.length == 1);
         require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(beneficiaryPkh));
         require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - fee);
+        require(tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);
+        require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);
+        require(tx.outputs[0].nftCommitment == tx.inputs[this.activeInputIndex].nftCommitment);
     }
 
     // Deadline passed without a release: anyone can send the stake to the beneficiary.
@@ -42,5 +50,8 @@ contract Pact(
         require(tx.outputs.length == 1);
         require(tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(beneficiaryPkh));
         require(tx.outputs[0].value == tx.inputs[this.activeInputIndex].value - fee);
+        require(tx.outputs[0].tokenCategory == tx.inputs[this.activeInputIndex].tokenCategory);
+        require(tx.outputs[0].tokenAmount == tx.inputs[this.activeInputIndex].tokenAmount);
+        require(tx.outputs[0].nftCommitment == tx.inputs[this.activeInputIndex].nftCommitment);
     }
 }

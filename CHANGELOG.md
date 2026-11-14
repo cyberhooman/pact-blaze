@@ -10,3 +10,7 @@ Each line below is one thing built during BLAZE, with its commit.
 
 ## 14 Nov
 - Fork from `before-blaze`. Repo link now points here. Changelog started.
+- Contract v2: a stake can be a CashToken (PUSD). Every exit keeps the token's category, amount and NFT commitment, so one contract serves BCH and PUSD. Tests attack all three exits. `npm run mutate` removes each of the 25 rules in turn and the tests catch all 25. ([2c2ce07](https://github.com/cyberhooman/pact-blaze/commit/2c2ce07))
+- PUSD pacts in the app logic: stake and 1% fee in the token, payouts carry it. The funding note now names the owner, so any pact can be rebuilt from the chain with no wallet (for the public feed). ([3d30e6b](https://github.com/cyberhooman/pact-blaze/commit/3d30e6b))
+- Oracle: on mainnet, "Use sample proof" only opens tiny demo pacts (about $0.50 of BCH or 1 PUSD). Real pacts need a real photo. ([97e29af](https://github.com/cyberhooman/pact-blaze/commit/97e29af))
+- End-to-end on real chipnet with a minted test token in place of PUSD: 20 of 20 checks pass. Token release: [b3d163a6](https://chipnet.imaginary.cash/tx/b3d163a6ba03b79db5d65175cc8d596380aacfd6e0fbdce8b157fdc2653e842b), token give-up: [1e325339](https://chipnet.imaginary.cash/tx/1e32533930cfe613309cc5186f4208e516885ab7786f134b32efd9b26de72086). ([c4ce055](https://github.com/cyberhooman/pact-blaze/commit/c4ce055))

@@ -5,7 +5,7 @@ export const NETWORK = env.VITE_NETWORK === 'mainnet' ? 'mainnet' : 'chipnet';
 export const FEE_ADDRESS = env.VITE_FEE_ADDRESS || '';
 export const BANNER = {
   slides: env.VITE_SLIDES_URL || '#slides-coming-soon',
-  repo: env.VITE_REPO_URL || 'https://github.com/cyberhooman/bchblaze-pact',
+  repo: env.VITE_REPO_URL || 'https://github.com/cyberhooman/pact-blaze',
   vote: env.VITE_VOTE_ADDRESS || 'bitcoincash:zVOTE-ADDRESS-PLACEHOLDER',
 };
 // "Label=address,Label=address". Empty addresses show as disabled chips.

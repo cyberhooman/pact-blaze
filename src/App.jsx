@@ -1,13 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useWizardConnect, WizardConnectQRDialog } from '@wizardconnect/react';
-import { chainProvider, pactStatus, makePact, buildFunding, fundingSignRequest, buildRelease, buildForfeit, forfeitSignRequest, buildExpire, platformFee, pkhAddress, encodeShare, decodeShare, SETTLE_FEE } from './pact.js';
+import { chainProvider, pactStatus, makePact, buildFunding, fundingSignRequest, buildRelease, buildForfeit, forfeitSignRequest, buildExpire, platformFee, tokenFee, pkhAddress, encodeShare, decodeShare, SETTLE_FEE } from './pact.js';
 import { ownerOf, walletUtxos, walletPacts, electrumHistory, signAndSend, parseP2pkh } from './wallet.js';
-import { NETWORK, FEE_ADDRESS, BANNER, BENEFICIARIES, FALLBACK_BCH_USD, explorerTx, explorerAddress } from './config.js';
+import { NETWORK, FEE_ADDRESS, BANNER, BENEFICIARIES, FALLBACK_BCH_USD, STAKE_TOKEN, explorerTx, explorerAddress } from './config.js';
 
 const provider = chainProvider(NETWORK);
 const short = (s, n = 6) => (s && s.length > 2 * n + 1 ? `${s.slice(0, n)}…${s.slice(-n)}` : s);
 const fmtSats = (s) => Number(s).toLocaleString('en-US');
 const fmtUsd = (sats, usd) => `$${((Number(sats) / 1e8) * usd).toFixed(2)}`;
+// A stake is sats, or token base units. Only our dollar token has a known symbol and 2 decimals.
+const isDollarToken = (t) => t && STAKE_TOKEN && t.category === STAKE_TOKEN.category;
+const fmtUnits = (u) => (Number(u) / 10 ** STAKE_TOKEN.decimals).toFixed(STAKE_TOKEN.decimals);
+const fmtStake = (p) => (!p.token ? `${fmtSats(p.stake)} sats`
+  : isDollarToken(p.token) ? `${fmtUnits(p.stake)} ${STAKE_TOKEN.symbol}` : `${fmtSats(p.stake)} token units`);
+const stakeUsd = (p, usd) => (!p.token ? fmtUsd(p.stake, usd) : isDollarToken(p.token) ? `$${fmtUnits(p.stake)}` : '');
 
 // Small per-browser memory of verdicts and payout txids; the chain is the source of truth.
 const remember = (txid, v) => { try { localStorage.setItem(`pact:${txid}`, JSON.stringify(v)); } catch {} };
@@ -115,7 +121,7 @@ function MyPacts({ wc }) {
           return (
             <li key={p.txid}>
               <a href={`#/p/${encodeShare(p)}`}>{p.goal}</a>
-              <span className="muted">{fmtSats(p.stake)} sats · until {new Date(p.deadline * 1000).toLocaleString()}</span>
+              <span className="muted">{fmtStake(p)} · until {new Date(p.deadline * 1000).toLocaleString()}</span>
               <span className={`tag ${cls}`}>{label}</span>
             </li>
           );
@@ -145,7 +151,8 @@ function Create({ wc, usd }) {
   }, []);
   const [goal, setGoal] = useState('');
   const [deadline, setDeadline] = useState(defaultDeadline);
-  const [stakeUsd, setStakeUsd] = useState(1);
+  const [dollars, setDollars] = useState(1);
+  const [inToken, setInToken] = useState(false); // stake in the dollar token (PUSD) instead of BCH
   const [benef, setBenef] = useState('');
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
@@ -153,8 +160,10 @@ function Create({ wc, usd }) {
 
   useEffect(() => { fetch('/api/judge').then((r) => r.json()).then(setOracle).catch(() => setOracle({ error: 'Oracle unreachable.' })); }, []);
 
-  const stake = BigInt(Math.max(10_000, Math.round((stakeUsd / usd) * 1e8)));
-  const fee = platformFee(stake);
+  const token = inToken && STAKE_TOKEN ? STAKE_TOKEN : null;
+  const stake = token ? BigInt(Math.round(dollars * 10 ** token.decimals)) : BigInt(Math.max(10_000, Math.round((dollars / usd) * 1e8)));
+  const fee = token ? tokenFee(stake) : platformFee(stake);
+  const amount = (n) => (token ? `${fmtUnits(n)} ${token.symbol}` : `${fmtSats(n)} sats`);
   const connected = wc.state === 'connected' && wc.manager;
   const fullGoal = `I will ${goal.trim()}`;
 
@@ -175,10 +184,10 @@ function Create({ wc, usd }) {
 
       setBusy('Finding your coins…');
       const utxos = await walletUtxos(wc.manager, provider, NETWORK);
-      const funding = buildFunding({ utxos, contract, stake, goal: fullGoal, deadline: dl, feeAddress: FEE_ADDRESS, changeAddress: owner.address, provider });
+      const funding = buildFunding({ utxos, contract, stake, goal: fullGoal, deadline: dl, feeAddress: FEE_ADDRESS, changeAddress: owner.address, provider, token });
       setBusy('Approve in your wallet…');
       const txid = await signAndSend(wc.manager, provider, fundingSignRequest(funding, `Pact: ${fullGoal}`));
-      location.hash = `#/p/${encodeShare({ ...params, network: NETWORK, goal: fullGoal, stake, txid, vout: 0 })}`;
+      location.hash = `#/p/${encodeShare({ ...params, network: NETWORK, goal: fullGoal, stake, txid, vout: 0, token: token && { category: token.category } })}`;
     } catch (e) {
       setErr(e.message || String(e));
     } finally {
@@ -189,7 +198,7 @@ function Create({ wc, usd }) {
   return (
     <section className="create">
       <h1>Bet on yourself.<br /><em>An AI judges.</em><br />The covenant pays.</h1>
-      <p className="lede">Stake a little BCH on a goal. Prove it with a photo before the deadline and it comes back to you. Miss it and it goes to the person or charity you named. Nobody else can ever touch it.</p>
+      <p className="lede">Stake a little BCH{STAKE_TOKEN ? ` or ${STAKE_TOKEN.symbol} (dollars)` : ''} on a goal. Prove it with a photo before the deadline and it comes back to you. Miss it and it goes to the person or charity you named. Nobody else can ever touch it.</p>
 
       <div className="card form">
         <label className="goal">
@@ -206,10 +215,16 @@ function Create({ wc, usd }) {
             <span className="lbl">Stake</span>
             <div className="chips">
               {[0.5, 1, 2].map((v) => (
-                <button key={v} type="button" className={stakeUsd === v ? 'chip on' : 'chip'} onClick={() => setStakeUsd(v)}>${v.toFixed(2)}</button>
+                <button key={v} type="button" className={dollars === v ? 'chip on' : 'chip'} onClick={() => setDollars(v)}>${v.toFixed(2)}</button>
               ))}
             </div>
-            <small>{fmtSats(stake)} sats + 1% fee ({fmtSats(fee)} sats)</small>
+            {STAKE_TOKEN && (
+              <div className="chips">
+                <button type="button" className={!inToken ? 'chip on' : 'chip'} onClick={() => setInToken(false)}>in BCH</button>
+                <button type="button" className={inToken ? 'chip on' : 'chip'} onClick={() => setInToken(true)}>in {STAKE_TOKEN.symbol}</button>
+              </div>
+            )}
+            <small>{amount(stake)} + 1% fee ({amount(fee)})</small>
           </label>
         </div>
 
@@ -228,7 +243,7 @@ function Create({ wc, usd }) {
 
         {connected ? (
           <button className="primary" disabled={!!busy} onClick={stakeIt}>
-            {busy || `Stake ${fmtUsd(stake, usd)} on it`}
+            {busy || `Stake ${token ? `${fmtUnits(stake)} ${token.symbol}` : fmtUsd(stake, usd)} on it`}
           </button>
         ) : (
           <button className="primary" disabled={wc.state === 'connecting' && !wc.uri} onClick={wc.connect}>
@@ -243,7 +258,7 @@ function Create({ wc, usd }) {
       <MyPacts wc={wc} />
 
       <ol className="steps">
-        <li><span><b>Stake.</b> One wallet approval locks your BCH in a covenant.</span></li>
+        <li><span><b>Stake.</b> One wallet approval locks your stake in a covenant.</span></li>
         <li><span><b>Prove it.</b> Upload a photo. Claude looks at it and signs a verdict.</span></li>
         <li><span><b>Get paid.</b> The covenant releases the stake to you, or to your beneficiary.</span></li>
       </ol>
@@ -269,6 +284,8 @@ function PactPage({ share, usd, wc }) {
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [seen, setSeen] = useState(false); // the stake has been seen at the covenant at least once
+  const [oracle, setOracle] = useState(null);
+  useEffect(() => { fetch('/api/judge').then((r) => r.json()).then(setOracle).catch(() => {}); }, []);
 
   useEffect(() => { if (utxo) setSeen(true); }, [utxo]);
   useEffect(() => { if (!p.error) savePact(share); }, [share]);
@@ -290,6 +307,9 @@ function PactPage({ share, usd, wc }) {
   const owner = pkhAddress(p.ownerPkh, p.network), beneficiary = pkhAddress(p.beneficiaryPkh, p.network);
 
   const save = (r) => { setResult(r); remember(p.txid, r); };
+  // On mainnet the oracle only accepts sample proof for tiny demo pacts (see lib/oracle.js sampleTooBig).
+  const cap = oracle?.sampleCap;
+  const sampleOk = !cap || !utxo || (utxo.token ? utxo.token.amount <= BigInt(cap.units) : utxo.satoshis <= BigInt(cap.sats));
 
   async function run(mode, image) {
     setErr('');
@@ -361,7 +381,7 @@ function PactPage({ share, usd, wc }) {
         <span className={`status s-${status.toLowerCase().replace('…', '')}`}>{status}</span>
         <h2>“{p.goal}”</h2>
         <div className="stats">
-          <div><b>{fmtSats(p.stake)}</b><small>sats staked · {fmtUsd(p.stake, usd)}</small></div>
+          <div><b>{fmtStake(p)}</b><small>staked{stakeUsd(p, usd) ? ` · ${stakeUsd(p, usd)}` : ''}</small></div>
           <div><b className="mono">{left > 0 ? countdown(left) : '00:00:00'}</b><small>until {new Date(p.deadline * 1000).toLocaleString()}</small></div>
         </div>
         <dl className="chain">
@@ -382,10 +402,12 @@ function PactPage({ share, usd, wc }) {
             <span>📷 Upload a photo of your proof</span>
           </label>
           <div className="row2">
-            <button className="secondary" disabled={!!busy} onClick={() => run('sample')}>Use sample proof (demo)</button>
+            {sampleOk && <button className="secondary" disabled={!!busy} onClick={() => run('sample')}>Use sample proof (demo)</button>}
             <button className="danger" disabled={!!busy} onClick={giveUp}>Give up</button>
           </div>
-          <p className="muted">The demo sample proof always passes, so you can try the full flow without a photo. Give up needs the owner's wallet to sign.</p>
+          <p className="muted">{sampleOk
+            ? 'The demo sample proof always passes, so you can try the full flow without a photo.'
+            : 'This pact is above the demo size, so it needs a real photo.'} Give up needs the owner's wallet to sign.</p>
         </div>
       )}
 

@@ -12,6 +12,11 @@ export const BANNER = {
 export const BENEFICIARIES = (env.VITE_BENEFICIARIES || 'A charity=,A friend=')
   .split(',').map((s) => s.split('=')).map(([label, address]) => ({ label: label.trim(), address: (address || '').trim() }));
 export const FALLBACK_BCH_USD = Number(env.VITE_BCH_USD || 400);
+// The dollar token you can stake: PUSD on mainnet; on chipnet a test token we minted (VITE_TEST_TOKEN), else none.
+const PUSD_CATEGORY = '2469acc5afa4b10cb5b5c04afb89c3a3ffd61c5da9c01e26d00951cae2a02544';
+export const STAKE_TOKEN = NETWORK === 'mainnet'
+  ? { category: PUSD_CATEGORY, decimals: 2, symbol: 'PUSD' }
+  : env.VITE_TEST_TOKEN ? { category: env.VITE_TEST_TOKEN, decimals: 2, symbol: 'tPUSD' } : null;
 
 export const explorerTx = (txid) => (NETWORK === 'mainnet'
   ? `https://blockchair.com/bitcoin-cash/transaction/${txid}`

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { compileFile } from 'cashc';
 import { MockNetworkProvider, SignatureTemplate, randomUtxo, placeholderPublicKey, placeholderSignature } from 'cashscript';
 import { secp256k1, hash160, binToHex, hexToBin, generatePrivateKey, decodeTransactionUnsafe, cashAddressToLockingBytecode, lockingBytecodeToCashAddress } from '@bitauth/libauth';
-import { makePact, readPactNote, pactFromFunding, pactStatus, buildFunding, fundingSignRequest, buildRelease, buildForfeit, forfeitSignRequest, buildExpire, platformFee, pkhAddress, encodeShare, decodeShare, DUST, SETTLE_FEE } from '../src/pact.js';
+import { makePact, readPactNote, pactFromFunding, pactStatus, buildFunding, fundingSignRequest, buildRelease, buildForfeit, forfeitSignRequest, buildExpire, platformFee, tokenFee, tokenAddressOf, pkhAddress, encodeShare, decodeShare, DUST, SETTLE_FEE, TOKEN_SATS, TOKEN_DUST } from '../src/pact.js';
 import { oraclePubkey, signVerdict } from '../lib/oracle.js';
 import artifact from '../src/Pact.json' with { type: 'json' };
 import { parseExtendedJson } from '@wizardconnect/core';
@@ -109,7 +109,10 @@ assert.throws(() => decodeShare(encodeShare({ ...share, txid: 'nope' })), /Bad s
 let fund = await fundPact();
 const fundHex = await provider.getRawTransaction(fund.txid);
 const note = decodeTransactionUnsafe(hexToBin(fundHex)).outputs.map((o) => readPactNote(o.lockingBytecode)).find(Boolean);
-assert.deepEqual(note, { goal: GOAL, deadline: DEADLINE, beneficiaryPkh: params.beneficiaryPkh, oraclePk: params.oraclePk });
+assert.deepEqual(note, { goal: GOAL, deadline: DEADLINE, beneficiaryPkh: params.beneficiaryPkh, oraclePk: params.oraclePk, ownerPkh: params.ownerPkh });
+assert.ok(binToHex(decodeTransactionUnsafe(hexToBin(fundHex)).outputs[2].lockingBytecode).length / 2 <= 223, 'note fits OP_RETURN limit');
+// The feed reads pacts with no wallet at all: the note names the owner.
+assert.equal(makePact(pactFromFunding(fundHex, fund.txid, null, N, provider), provider).address, contract.address);
 const rebuilt = pactFromFunding(fundHex, fund.txid, params.ownerPkh, N, provider);
 assert.equal(makePact(rebuilt, provider).address, contract.address);
 assert.equal(rebuilt.goal, GOAL); assert.equal(rebuilt.stake, STAKE); assert.equal(rebuilt.txid, fund.txid);
@@ -130,4 +133,43 @@ const gone = await buildForfeit({ contract, utxo: fund, ...params, network: N, p
 assert.equal(await pactStatus({ ...ours, txid: fund.txid }, provider, history([fund.txid, returned.txid, gone.txid])), 'forfeited');
 assert.equal(await pactStatus({ ...ours, txid: 'ab'.repeat(32) }, provider, history([])), 'pending');
 
-console.log(`pact OK: sign request, 1% fee, OP_RETURN, release, forfeit, expire, share link, your-pacts rebuild + status`);
+// 8. Token (PUSD) pacts: stake and 1% fee in the token, payouts carry it, the chain rebuilds it.
+const CAT = 'cd'.repeat(32), TSTAKE = 300n, token = { category: CAT, symbol: 'PUSD' };
+assert.equal(tokenFee(300n), 3n); assert.equal(tokenFee(50n), 1n);
+const ownerTok = tokenAddressOf(ownerAddr);
+const fundTokenPact = async (have = 1000n) => {
+  provider.addUtxo(ownerTok, randomUtxo({ satoshis: 1000n, token: { category: CAT, amount: have } }));
+  provider.addUtxo(ownerAddr, randomUtxo({ satoshis: 20_000n }));
+  const utxos = [...await provider.getUtxos(ownerAddr), ...await provider.getUtxos(ownerTok)].map((u) => ({ ...u, address: ownerAddr, path: 'receive', index: 0 }));
+  const f = buildFunding({ ...opts, utxos, stake: TSTAKE, token, unlockerFor: () => signer.unlockP2PKH() });
+  const sent = await f.builder.send();
+  const out = decodeTransactionUnsafe(hexToBin(sent.hex)).outputs;
+  assert.equal(out[0].valueSatoshis, TOKEN_SATS); assert.equal(out[0].token.amount, TSTAKE);
+  assert.equal(binToHex(out[0].token.category), CAT);
+  assert.equal(lockingBytecodeToCashAddress({ bytecode: out[1].lockingBytecode, prefix: 'bchtest' }).address, feeAddress);
+  assert.equal(out[1].token.amount, 3n); assert.equal(out[1].valueSatoshis, TOKEN_DUST);
+  const tokensIn = f.builder.inputs.reduce((t, i) => t + (i.token?.amount ?? 0n), 0n);
+  if (tokensIn > TSTAKE + 3n) assert.equal(out[3].token.amount, tokensIn - TSTAKE - 3n, 'token change back to the owner');
+  else assert.ok(!out[3].token, 'exact amount: no token change');
+  return { utxo: (await contract.getUtxos()).find((u) => u.txid === sent.txid && u.vout === 0), hex: sent.hex };
+};
+const tokenPayee = (hex) => {
+  const [o] = decodeTransactionUnsafe(hexToBin(hex)).outputs;
+  assert.equal(o.token.amount, TSTAKE); assert.equal(binToHex(o.token.category), CAT); assert.equal(o.valueSatoshis, TOKEN_SATS - SETTLE_FEE);
+  return lockingBytecodeToCashAddress({ bytecode: o.lockingBytecode, prefix: 'bchtest' }).address;
+};
+let t = await fundTokenPact();
+assert.equal(tokenPayee((await buildRelease({ contract, utxo: t.utxo, sig: signVerdict(oracleHex, t.utxo.txid, 0), ...params, network: N, provider }).send()).hex), ownerAddr);
+t = await fundTokenPact();
+assert.equal(tokenPayee((await buildForfeit({ contract, utxo: t.utxo, ...params, network: N, provider,
+  ownerPk: secp256k1.derivePublicKeyCompressed(owner.priv), ownerSig: new SignatureTemplate(owner.priv) }).builder.send()).hex), pkhAddress(beneficiary.pkh, N));
+t = await fundTokenPact(TSTAKE + 3n); // exact: no token change output
+const tRebuilt = pactFromFunding(t.hex, t.utxo.txid, null, N, provider);
+assert.deepEqual(tRebuilt.token, { category: CAT }); assert.equal(tRebuilt.stake, TSTAKE);
+assert.equal(tokenPayee((await buildExpire({ contract, utxo: t.utxo, ...params, network: N, provider }).send()).hex), pkhAddress(beneficiary.pkh, N));
+const tBack = decodeShare('#' + encodeShare({ ...tRebuilt, fee: SETTLE_FEE }));
+assert.deepEqual(tBack.token, { category: CAT }); assert.equal(tBack.stake, TSTAKE);
+assert.throws(() => buildFunding({ ...opts, utxos: [], stake: TSTAKE, token }), /Not enough PUSD/);
+assert.throws(() => buildFunding({ ...opts, utxos: [], stake: 10n, token }), /at least 50/);
+
+console.log(`pact OK: sign request, 1% fee, OP_RETURN, release, forfeit, expire, share link, your-pacts rebuild + status, feed rebuild, PUSD pacts`);

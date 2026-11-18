@@ -1,22 +1,26 @@
-// End-to-end check on real chipnet against a deployed oracle (default: the BLAZE after-demo).
-// Covers BCH pacts and token pacts (a test token minted once, since chipnet has no PUSD).
-// Run: node scripts/e2e-chipnet.mjs [baseUrl]
-// Uses a burner chipnet key kept in .env as E2E_PRIVKEY_HEX (created on first run, never printed).
-// One photo check calls Claude (about 1-2 cents of API credit); everything else is free.
+// End-to-end check on a real chain against a deployed oracle (default: the BLAZE after-demo).
+// Covers BCH pacts and token pacts (chipnet: a test token minted once; mainnet: PUSD, if the burner holds some).
+// Run: node scripts/e2e.mjs [baseUrl]            chipnet, burner E2E_PRIVKEY_HEX (created on first run)
+//      node scripts/e2e.mjs --mainnet [baseUrl]  mainnet, burner MAINNET_TEST_PRIVKEY_HEX, tiny stakes,
+//                                                 give-ups pay the user's own fee address. Keys are never printed.
+// One photo check calls Claude (about 1-2 cents of API credit).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { SignatureTemplate, TransactionBuilder } from 'cashscript';
 import { secp256k1, hash160, binToHex, hexToBin, generatePrivateKey, decodeCashAddress } from '@bitauth/libauth';
-import { chainProvider, makePact, buildFunding, buildRelease, buildForfeit, pkhAddress, pactFromFunding, tokenAddressOf, SETTLE_FEE } from '../src/pact.js';
+import { chainProvider, makePact, buildFunding, buildRelease, buildForfeit, pkhAddress, pactFromFunding, tokenAddressOf, SETTLE_FEE, PUSD } from '../src/pact.js';
 
-const BASE = process.argv[2] ?? 'https://pact-blaze.vercel.app';
-const NET = 'chipnet';
-const BENEFICIARY = 'bchtest:qregmr8wn2yzhg7wgxsdakkc93g7yh3anvnxaqskqf'; // tbch.googol.cash donation address
+const NET = process.argv.includes('--mainnet') ? 'mainnet' : 'chipnet';
+const BASE = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? 'https://pact-blaze.vercel.app';
+const MAIN_FEE = 'bitcoincash:qz9nz8fsnr55s3wzw3quau76u79mmhuxzyd7nku5c3'; // the user's own wallet
+const BENEFICIARY = NET === 'mainnet' ? MAIN_FEE : 'bchtest:qregmr8wn2yzhg7wgxsdakkc93g7yh3anvnxaqskqf'; // chipnet: tbch.googol.cash
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
-const txLink = (id) => `https://chipnet.imaginary.cash/tx/${id}`;
+const txLink = (id) => (NET === 'mainnet' ? `https://blockchair.com/bitcoin-cash/transaction/${id}` : `https://chipnet.imaginary.cash/tx/${id}`);
 
 const envUrl = new URL('../.env', import.meta.url);
 let env = readFileSync(envUrl, 'utf8');
-let priv = env.match(/^E2E_PRIVKEY_HEX=([0-9a-f]{64})$/m)?.[1];
+const KEY = NET === 'mainnet' ? 'MAINNET_TEST_PRIVKEY_HEX' : 'E2E_PRIVKEY_HEX';
+let priv = env.match(new RegExp(`^${KEY}=([0-9a-f]{64})$`, 'm'))?.[1];
+if (!priv && NET === 'mainnet') { console.log('No MAINNET_TEST_PRIVKEY_HEX in .env.'); process.exit(2); }
 if (!priv) {
   priv = binToHex(generatePrivateKey());
   writeFileSync(envUrl, `${env.replace(/\n?$/, '\n')}E2E_PRIVKEY_HEX=${priv}\n`);
@@ -25,7 +29,7 @@ const pk = secp256k1.derivePublicKeyCompressed(hexToBin(priv));
 const ownerPkh = binToHex(hash160(pk));
 const owner = pkhAddress(ownerPkh, NET);
 const beneficiaryPkh = binToHex(decodeCashAddress(BENEFICIARY).payload);
-const feeAddress = env.match(/^VITE_FEE_ADDRESS=(\S+)$/m)?.[1] || owner;
+const feeAddress = NET === 'mainnet' ? MAIN_FEE : env.match(/^VITE_FEE_ADDRESS=(\S+)$/m)?.[1] || owner;
 const provider = chainProvider(NET);
 const signer = new SignatureTemplate(hexToBin(priv));
 
@@ -33,7 +37,7 @@ const coins = async () => (await provider.getUtxos(owner)).filter((u) => !u.toke
 const have = (await coins()).reduce((s, u) => s + u.satoshis, 0n);
 console.log(`Script wallet ${owner}: ${have} sats`);
 if (have < 30_000n) {
-  console.log('Send at least 30,000 chipnet sats to that address, then run this again.');
+  console.log(`Send at least 30,000 ${NET} sats to that address, then run this again.`);
   process.exit(2);
 }
 
@@ -71,10 +75,12 @@ async function testToken() {
   return seed.txid;
 }
 
+// Mainnet sample proof only opens pacts at or under 1.00 PUSD (100 units), so token stakes stay at the cap there.
+const TOKEN_STAKE = NET === 'mainnet' ? 100n : 300n;
 async function stake(goal, token) {
   const deadline = Math.floor(Date.now() / 1000) + 86400;
   const contract = makePact({ ownerPkh, beneficiaryPkh, oraclePk: oraclePubkey, deadline, fee: SETTLE_FEE }, provider);
-  const funding = buildFunding({ utxos: await allCoins(), contract, stake: token ? 300n : 10_000n, goal, deadline, feeAddress,
+  const funding = buildFunding({ utxos: await allCoins(), contract, stake: token ? TOKEN_STAKE : 10_000n, goal, deadline, feeAddress,
     changeAddress: owner, provider, token, unlockerFor: () => signer.unlockP2PKH() });
   const { txid } = await funding.builder.send();
   let utxo;
@@ -85,7 +91,7 @@ async function stake(goal, token) {
   check('stake lands in the covenant', Boolean(utxo), txLink(txid));
   const found = pactFromFunding(await provider.getRawTransaction(txid), txid, ownerPkh, NET, provider);
   check('the pact can be rebuilt from its funding tx alone', found && makePact(found, provider).address === contract.address);
-  if (token) check('the stake is the token', utxo?.token?.category === token.category && utxo.token.amount === 300n, `(${utxo?.token?.amount} units)`);
+  if (token) check('the stake is the token', utxo?.token?.category === token.category && utxo.token.amount === TOKEN_STAKE, `(${utxo?.token?.amount} units)`);
   return { contract, utxo, req: { txid, vout: utxo.vout, goal, deadline, ownerPkh, beneficiaryPkh, fee: String(SETTLE_FEE) } };
 }
 
@@ -118,8 +124,14 @@ const ff = await buildForfeit({ contract: p2.contract, utxo: p2.utxo, beneficiar
   ownerPk: pk, ownerSig: signer }).builder.send();
 check('owner-signed forfeit pays the beneficiary', Boolean(ff.txid), txLink(ff.txid));
 
-console.log('\n3. Token pact (test token for PUSD): stake, prove, release; stake, give up');
-const token = { category: await testToken(), symbol: 'TEST' };
+const pusdUnits = (await allCoins()).filter((c) => c.token?.category === PUSD.category).reduce((s, c) => s + c.token.amount, 0n);
+if (NET === 'mainnet' && pusdUnits < 2n * (TOKEN_STAKE + 1n)) {
+  console.log(`\n3. PUSD pacts SKIPPED: the burner holds ${pusdUnits} PUSD units, needs ${2n * (TOKEN_STAKE + 1n)}. Send PUSD to ${tokenAddressOf(owner)}.`);
+  console.log(failed ? `\n${failed} check(s) FAILED` : '\nALL BCH CHECKS PASSED');
+  process.exit(failed ? 1 : 0);
+}
+console.log(`\n3. Token pact (${NET === 'mainnet' ? 'PUSD' : 'test token for PUSD'}): stake, prove, release; stake, give up`);
+const token = NET === 'mainnet' ? PUSD : { category: await testToken(), symbol: 'TEST' };
 const p3 = await stake('token pact: walk 10k steps', token);
 r = await judge({ ...p3.req, mode: 'sample' });
 check('sample proof is signed for a token pact', r.status === 200 && /^[0-9a-f]{128}$/.test(r.body.sig ?? ''), `(${r.status})`);

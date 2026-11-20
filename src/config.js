@@ -4,7 +4,7 @@ const env = import.meta.env;
 export const NETWORK = env.VITE_NETWORK === 'mainnet' ? 'mainnet' : 'chipnet';
 export const FEE_ADDRESS = env.VITE_FEE_ADDRESS || '';
 export const BANNER = {
-  slides: env.VITE_SLIDES_URL || '#slides-coming-soon',
+  slides: env.VITE_SLIDES_URL || 'https://docs.google.com/presentation/d/1yXUD5-sunwF_ce6cGEhgT21e3LL5kCHk7FhXlBAhYN4/edit?usp=sharing',
   repo: env.VITE_REPO_URL || 'https://github.com/cyberhooman/pact-blaze',
   vote: env.VITE_VOTE_ADDRESS || 'bitcoincash:zpr2waldp42mzs2wquq26v6vy6ks7n8dvcl9x3pt8l',
   // BLAZE rule: pre-existing work shows its before demo and before code next to the new ones.

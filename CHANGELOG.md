@@ -26,3 +26,8 @@ Each line below is one thing built during BLAZE, with its commit.
 - **PUSD on mainnet.** Bought 3 PUSD on Cauldron with WizardConnect from Cashonize ([a921c50a](https://blockchair.com/bitcoin-cash/transaction/a921c50aefb92b7d9db9d8d45ed368887cfa7512ff41472ac4adaf91894f1a0f)), then sent 2.02 PUSD to the test wallet. Full mainnet run, 20 of 20 checks pass:
   - PUSD stake of 1.00: [6b9aad85](https://blockchair.com/bitcoin-cash/transaction/6b9aad850c56dfacda3349dce156c3c18d71158bd6f185997c9b78b9a56a5ab4). The covenant refused a payout that drops the token. The release gave the PUSD back to the owner: [4268658f](https://blockchair.com/bitcoin-cash/transaction/4268658f88c13793323d146bba5a6cd156e48a33664e6b06b8fc770d839ae45a).
   - PUSD stake of 1.00: [f85ce278](https://blockchair.com/bitcoin-cash/transaction/f85ce2782f4e6c0a6da109fb0c129adb9952c0ac6a5d849b7abdc8cb322d6ea5), then the owner gave up and the PUSD went to the beneficiary: [9695972f](https://blockchair.com/bitcoin-cash/transaction/9695972fcd7d46a79a274730c77157264864bf2b7582bb21d0c3e55e2e387cea).
+
+## 21 Nov
+- Settled share links say what happened: "Paid back" or "Paid to beneficiary", read from the covenant history. Before, a finished pact opened from a link just said Expired. ([ed4016b](https://github.com/cyberhooman/pact-blaze/commit/ed4016b))
+- Anthropic key rotated on both demos. Timed 3 real Claude verdicts with the new key: 4.2 s, 4.8 s, 2.9 s.
+- Screenshots for the BUIDL page in `docs/buidl/`.

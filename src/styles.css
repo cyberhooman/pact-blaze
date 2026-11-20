@@ -100,6 +100,8 @@ h3 { font: 600 20px var(--serif); margin: 0 0 12px; }
 .s-live { background: #dff3ea; color: var(--green); }
 .s-settled { background: var(--ink); color: var(--paper); }
 .s-expired { background: #fbe3d6; color: var(--seal); }
+.s-paid-back { background: #dff3ea; color: var(--green); }
+.s-paid-to-beneficiary { background: var(--ink); color: var(--paper); }
 .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 14px 0; border-top: 1px dashed var(--rule); border-bottom: 1px dashed var(--rule); margin-bottom: 14px; }
 .stats b { display: block; font: 600 26px var(--serif); }
 .stats b.mono { font: 600 22px var(--mono); }

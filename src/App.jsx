@@ -288,6 +288,11 @@ function PactPage({ share, usd, wc }) {
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const [seen, setSeen] = useState(false); // the stake has been seen at the covenant at least once
+  const [outcome, setOutcome] = useState(null); // 'returned' | 'forfeited' once the coin has left the covenant
+  useEffect(() => {
+    if (utxo !== null || !contract) return;
+    pactStatus(p, provider, electrumHistory(provider)).then(setOutcome).catch(() => {});
+  }, [utxo, contract]);
   const [oracle, setOracle] = useState(null);
   useEffect(() => { fetch('/api/judge').then((r) => r.json()).then(setOracle).catch(() => {}); }, []);
 
@@ -307,7 +312,8 @@ function PactPage({ share, usd, wc }) {
   if (p.error) return <p className="error">{p.error}</p>;
 
   const left = p.deadline - now;
-  const settled = Boolean(result?.payoutTxid || (utxo === null && seen));
+  const paidOut = outcome === 'returned' || outcome === 'forfeited';
+  const settled = Boolean(result?.payoutTxid || (utxo === null && (seen || paidOut)));
   const owner = pkhAddress(p.ownerPkh, p.network), beneficiary = pkhAddress(p.beneficiaryPkh, p.network);
 
   const save = (r) => { setResult(r); remember(p.txid, r); };
@@ -378,11 +384,11 @@ function PactPage({ share, usd, wc }) {
     }
   }
 
-  const status = settled ? 'Settled' : utxo === undefined ? 'Checking…' : left > 0 ? 'Live' : 'Expired';
+  const status = outcome === 'returned' ? 'Paid back' : outcome === 'forfeited' ? 'Paid to beneficiary' : settled ? 'Settled' : utxo === undefined ? 'Checking…' : left > 0 ? 'Live' : 'Expired';
   return (
     <section className="pact">
       <div className="card hero">
-        <span className={`status s-${status.toLowerCase().replace('…', '')}`}>{status}</span>
+        <span className={`status s-${status.toLowerCase().replace('…', '').replaceAll(' ', '-')}`}>{status}</span>
         <h2>“{p.goal}”</h2>
         <div className="stats">
           <div><b>{fmtStake(p)}</b><small>staked{stakeUsd(p, usd) ? ` · ${stakeUsd(p, usd)}` : ''}</small></div>
@@ -432,8 +438,8 @@ function PactPage({ share, usd, wc }) {
       {err && <p className="error">{err}</p>}
 
       {result && <Verdict r={result} owner={owner} beneficiary={beneficiary} />}
-      {settled && !result && <p className="muted">This pact's coin is no longer at the covenant: it was settled. See the covenant address for the payout.</p>}
-      {utxo === null && !seen && !result && <p className="muted">Just staked? The network can take a few seconds to show it.</p>}
+      {settled && !result && <p className="muted">{outcome === 'returned' ? 'Goal met: the stake went back to the owner.' : outcome === 'forfeited' ? 'The stake went to the beneficiary.' : 'This pact was settled.'} The payout is on the covenant address above.</p>}
+      {utxo === null && !seen && !paidOut && !result && <p className="muted">Just staked? The network can take a few seconds to show it.</p>}
     </section>
   );
 }

@@ -32,3 +32,4 @@ Each line below is one thing built during BLAZE, with its commit.
 - Anthropic key rotated on both demos. Timed 3 real Claude verdicts with the new key: 4.2 s, 4.8 s, 2.9 s.
 - Screenshots for the BUIDL page in `docs/buidl/`.
 - Slides deck filled from the Widget Factory template and linked in the banner ([03cd472](https://github.com/cyberhooman/pact-blaze/commit/03cd472)).
+- My own pact on mainnet: 0.50 PUSD on "send my Pact entry to BCH BLAZE before Sunday 21:00" ([58e9ac2b](https://blockchair.com/bitcoin-cash/transaction/58e9ac2b515227b46b92d77aaa2e90a3e68b46c1b3c03e4a6d46ac78379630e9)). Submitted the BUIDL, uploaded a screenshot of it, Claude said met, paid back ([638ff0e2](https://blockchair.com/bitcoin-cash/transaction/638ff0e22d4709e2a3cf93fcdc953fcaeec115290214cb2cca19757cdfde607f)).

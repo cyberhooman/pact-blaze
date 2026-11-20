@@ -31,3 +31,4 @@ Each line below is one thing built during BLAZE, with its commit.
 - Settled share links say what happened: "Paid back" or "Paid to beneficiary", read from the covenant history. Before, a finished pact opened from a link just said Expired. ([ed4016b](https://github.com/cyberhooman/pact-blaze/commit/ed4016b))
 - Anthropic key rotated on both demos. Timed 3 real Claude verdicts with the new key: 4.2 s, 4.8 s, 2.9 s.
 - Screenshots for the BUIDL page in `docs/buidl/`.
+- Slides deck filled from the Widget Factory template and linked in the banner ([03cd472](https://github.com/cyberhooman/pact-blaze/commit/03cd472)).

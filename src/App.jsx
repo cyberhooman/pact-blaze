@@ -242,7 +242,8 @@ function Create({ wc, usd }) {
               ))}
             </div>
           )}
-          <input className="mono" value={benef} onChange={(e) => setBenef(e.target.value)} placeholder={NETWORK === 'mainnet' ? 'bitcoincash:q…' : 'bchtest:q…'} />
+          <input className="mono" value={benef} onChange={(e) => setBenef(e.target.value)} placeholder={`Or paste any address: ${NETWORK === 'mainnet' ? 'bitcoincash:q…' : 'bchtest:q…'}`} />
+          <small>The charity is only a suggestion. Paste a friend's address or any cause you like.</small>
         </label>
 
         {connected ? (

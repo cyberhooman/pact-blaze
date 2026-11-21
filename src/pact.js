@@ -1,6 +1,6 @@
 // Pact transaction helpers: pure, shared by the app and the tests.
 import { Contract, ElectrumNetworkProvider, TransactionBuilder, placeholderP2PKHUnlocker, placeholderPublicKey, placeholderSignature } from 'cashscript';
-import { encodeCashAddress, decodeCashAddress, hexToBin, binToHex, stringify, decodeTransactionUnsafe, lockingBytecodeToCashAddress } from '@bitauth/libauth';
+import { encodeCashAddress, decodeCashAddress, hexToBin, binToHex, stringify, decodeTransactionUnsafe, encodeTransaction, lockingBytecodeToCashAddress } from '@bitauth/libauth';
 import artifact from './Pact.json' with { type: 'json' };
 
 export const SETTLE_FEE = 1000n;   // covenant tx fee, paid from the stake on release/forfeit/expire
@@ -153,6 +153,8 @@ export async function pactStatus(p, provider, history) {
 // (`<bigint: Xn>`, `<Uint8Array: 0x..>`), which wallets decode; raw objects throw "Do not know how to serialize a BigInt".
 export function fundingSignRequest(funding, userPrompt = 'Stake on your Pact') {
   const wc = funding.builder.generateWcTransactionObject({ broadcast: false, userPrompt });
+  // The transaction itself goes as hex: Paytaca only reads hex there, Cashonize takes hex or an object.
+  wc.transaction = binToHex(encodeTransaction(wc.transaction));
   return { transaction: JSON.parse(stringify(wc)), inputPaths: funding.inputPaths };
 }
 

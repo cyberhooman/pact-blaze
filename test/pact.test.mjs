@@ -9,7 +9,12 @@ import artifact from '../src/Pact.json' with { type: 'json' };
 import { parseExtendedJson } from '@wizardconnect/core';
 
 // What the wallet sees: the request after the relay's plain JSON.stringify, decoded with WizardConnect's parser.
-const wire = (r) => parseExtendedJson(JSON.stringify(r.transaction));
+// The transaction itself travels as hex (Paytaca reads only hex there); decode it to check the contents.
+const wire = (r) => {
+  const w = parseExtendedJson(JSON.stringify(r.transaction));
+  assert.equal(typeof w.transaction, 'string', 'transaction must be hex for Paytaca');
+  return { ...w, transaction: decodeTransactionUnsafe(hexToBin(w.transaction)) };
+};
 
 // 0. The committed browser artifact matches the contract source.
 assert.equal(artifact.debug.bytecode, compileFile(new URL('../contracts/Pact.cash', import.meta.url)).debug.bytecode, 'run npm run compile');
